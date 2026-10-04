@@ -1,15 +1,17 @@
 package com.rajnishsystems.in.chatbot.service;
-import org.springframework.ai.vectorstore.VectorStore;
-import com.rajnishsystems.in.chatbot.tool.TavilySearchTool;
+
+import com.rajnishsystems.in.chatbot.model.ChatMessage;
+import com.rajnishsystems.in.chatbot.model.ChatSession;
+import com.rajnishsystems.in.chatbot.repository.ChatMessageRepository;
+import com.rajnishsystems.in.chatbot.repository.ChatSessionRepository;
 import org.springframework.ai.chat.client.ChatClient;
-import org.springframework.ai.chat.prompt.PromptTemplate;
-import org.springframework.ai.content.Media;
 import org.springframework.ai.document.Document;
+import org.springframework.ai.vectorstore.SearchRequest;
+import org.springframework.ai.vectorstore.VectorStore;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.io.Resource;
 import org.springframework.stereotype.Service;
-import org.springframework.util.MimeTypeUtils;
-import org.springframework.web.multipart.MultipartFile;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
 import java.util.stream.Collectors;
@@ -17,43 +19,64 @@ import java.util.stream.Collectors;
 @Service
 public class ChatService {
 
+    private final ChatSessionRepository sessionRepository;
+    private final ChatMessageRepository messageRepository;
     private final ChatClient chatClient;
     private final VectorStore vectorStore;
 
-    @Value("classpath:/prompts/rag-prompt.st")
+    @Value("classpath:prompts/rag-prompt.st")
     private Resource ragPromptResource;
 
-    public ChatService(ChatClient.Builder chatClientBuilder, VectorStore vectorStore, TavilySearchTool tavilySearchTool) {
+    public ChatService(ChatSessionRepository sessionRepository,
+                       ChatMessageRepository messageRepository,
+                       ChatClient.Builder chatClientBuilder,
+                       VectorStore vectorStore) {
+        this.sessionRepository = sessionRepository;
+        this.messageRepository = messageRepository;
+        this.chatClient = chatClientBuilder.build();
         this.vectorStore = vectorStore;
-        this.chatClient = chatClientBuilder
-                .defaultTools(tavilySearchTool)
-                .build();
     }
 
-    public String processRequest(String message, MultipartFile file) throws Exception {
-        // 1. Retrieve vector documents
-        List<Document> similarDocuments = vectorStore.similaritySearch(message);
-        String context = similarDocuments.isEmpty()
-                ? "No internal knowledge base documents found."
-                : similarDocuments.stream().map(Document::getText).collect(Collectors.joining("\n---\n"));
+    @Transactional
+    public ChatMessage processAndSaveMessage(Long sessionId, String userPrompt) {
+        ChatSession session = sessionRepository.findById(sessionId)
+                .orElseThrow(() -> new RuntimeException("Session not found"));
 
-        // 2. Render prompt from StringTemplate
-        PromptTemplate promptTemplate = new PromptTemplate(ragPromptResource);
-        promptTemplate.add("context", context);
-        promptTemplate.add("question", message);
-        String finalPrompt = promptTemplate.render();
+        // 1. Save user prompt to PostgreSQL
+        ChatMessage userMessage = new ChatMessage();
+        userMessage.setSession(session);
+        userMessage.setSender("user");
+        userMessage.setText(userPrompt);
+        messageRepository.save(userMessage);
 
-        // 3. Execute Multimodal call cleanly (No UserMessage or List.of() needed)
-        return chatClient.prompt()
-                .user(u -> {
-                    u.text(finalPrompt);
-                    if (file != null && !file.isEmpty()) {
-                        String contentType = file.getContentType() != null ? file.getContentType() : "image/jpeg";
-                        // file.getResource() is safe and doesn't throw IOExceptions inside the lambda
-                        u.media(new Media(MimeTypeUtils.parseMimeType(contentType), file.getResource()));
-                    }
-                })
+        // 2. Similarity search in pgvector using the new builder pattern
+        List<Document> similarDocuments = vectorStore.similaritySearch(
+                SearchRequest.builder()
+                        .query(userPrompt)
+                        .topK(3)
+                        .similarityThreshold(0.7)
+                        .build()
+        );
+
+        // 3. Extract text from the chunks
+        String contextData = similarDocuments.stream()
+                .map(Document::getText)
+                .collect(Collectors.joining("\n\n"));
+
+        // 4. Format dynamic prompt using rag-prompt.st
+        String aiResponseText = chatClient.prompt()
+                .user(userSpec -> userSpec.text(ragPromptResource)
+                        .param("context", contextData)
+                        .param("question", userPrompt))
                 .call()
                 .content();
+
+        // 5. Save LLM response to PostgreSQL
+        ChatMessage botMessage = new ChatMessage();
+        botMessage.setSession(session);
+        botMessage.setSender("bot");
+        botMessage.setText(aiResponseText);
+
+        return messageRepository.save(botMessage);
     }
 }
