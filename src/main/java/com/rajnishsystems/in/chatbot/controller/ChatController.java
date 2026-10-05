@@ -36,7 +36,7 @@ public class ChatController {
     @GetMapping("/sessions")
     public ResponseEntity<List<ChatSession>> getSessions(@AuthenticationPrincipal UserDetails userDetails) {
         User user = getUser(userDetails);
-        return ResponseEntity.ok(sessionRepository.findByUser(user));
+        return ResponseEntity.ok(sessionRepository.findByUserOrderByIdAsc(user));
     }
 
     @PostMapping("/sessions")

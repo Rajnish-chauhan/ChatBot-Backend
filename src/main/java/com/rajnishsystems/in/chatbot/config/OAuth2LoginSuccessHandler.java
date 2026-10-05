@@ -1,6 +1,5 @@
 package com.rajnishsystems.in.chatbot.config;
 
-
 import com.rajnishsystems.in.chatbot.model.User;
 import com.rajnishsystems.in.chatbot.repository.UserRepository;
 import jakarta.servlet.ServletException;
@@ -32,14 +31,17 @@ public class OAuth2LoginSuccessHandler extends SimpleUrlAuthenticationSuccessHan
 
         String email = oAuth2User.getAttribute("email");
         if (email == null) {
-            email = oAuth2User.getAttribute("login") + "@github.com";
+            email = oAuth2User.getAttribute("login") + "@google.com";
         }
 
-        String finalEmail = email;
-        User user = userRepository.findByUsername(email).orElseGet(() -> {
+        final String finalEmail = email;
+        User user = userRepository.findByEmail(finalEmail).orElseGet(() -> {
             User newUser = new User();
-            newUser.setUsername(finalEmail);
-            newUser.setPassword(UUID.randomUUID().toString()); // Random secure password for OAuth users
+            newUser.setEmail(finalEmail);
+            newUser.setUsername(finalEmail.split("@")[0] + "_" + UUID.randomUUID().toString().substring(0, 4));
+            newUser.setPassword(UUID.randomUUID().toString()); // Placeholder password until set
+            newUser.setPasswordSet(false);
+            newUser.setGuest(false);
             return userRepository.save(newUser);
         });
 
@@ -52,8 +54,10 @@ public class OAuth2LoginSuccessHandler extends SimpleUrlAuthenticationSuccessHan
 
         String token = jwtUtils.generateToken(userDetails);
 
-        // Redirect to frontend (adjust URL to match your React/Vite port)
-        String frontendUrl = "http://localhost:5173/oauth2/redirect?token=" + token;
+        // Redirect to frontend with token and flags
+        String frontendUrl = String.format("http://localhost:5173/oauth2/redirect?token=%s&username=%s&requiresPasswordSetup=%s",
+                token, user.getUsername(), !user.isPasswordSet());
+
         getRedirectStrategy().sendRedirect(request, response, frontendUrl);
     }
 }
