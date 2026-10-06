@@ -1,5 +1,6 @@
 package com.rajnishsystems.in.chatbot.config;
 
+import jakarta.servlet.DispatcherType;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.http.HttpMethod;
@@ -45,6 +46,9 @@ public class SecurityConfig {
                 .csrf(AbstractHttpConfigurer::disable)
                 .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authorizeHttpRequests(auth -> auth
+                        // CRITICAL FIX: Allow Spring to run the ASYNC streaming thread without re-authenticating
+                        .dispatcherTypeMatchers(DispatcherType.ASYNC).permitAll()
+
                         .requestMatchers(HttpMethod.OPTIONS, "/**").permitAll()
                         .requestMatchers("/api/auth/send-otp", "/api/auth/register-with-otp", "/api/auth/login", "/api/auth/guest").permitAll()
                         .requestMatchers("/swagger-ui/**", "/v3/api-docs/**", "/privacy-policy").permitAll()
