@@ -1,10 +1,10 @@
 package com.rajnishsystems.in.chatbot.service;
 
-import com.rajnishsystems.in.chatbot.config.AiToolsConfig.TavilyWebSearcher;
 import com.rajnishsystems.in.chatbot.model.ChatMessage;
 import com.rajnishsystems.in.chatbot.model.ChatSession;
 import com.rajnishsystems.in.chatbot.repository.ChatMessageRepository;
 import com.rajnishsystems.in.chatbot.repository.ChatSessionRepository;
+import com.rajnishsystems.in.chatbot.tool.TavilyWebSearchTool;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.prompt.PromptTemplate;
 import org.springframework.ai.document.Document;
@@ -14,7 +14,6 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.io.Resource;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
 import reactor.core.publisher.Flux;
 
@@ -29,28 +28,34 @@ public class ChatService {
     private final VectorStore vectorStore;
     private final ChatSessionRepository sessionRepository;
     private final ChatMessageRepository messageRepository;
-    private final TavilyWebSearcher tavilyWebSearcher;
+    private final TavilyWebSearchTool tavilyWebSearchTool;
 
-    @Value("classpath:prompts/rag-prompt.st")
+    @Value("classpath:prompts/promptTemplate.st")
     private Resource ragPromptTemplate;
 
     public ChatService(ChatClient.Builder chatClientBuilder,
                        VectorStore vectorStore,
                        ChatSessionRepository sessionRepository,
                        ChatMessageRepository messageRepository,
-                       TavilyWebSearcher tavilyWebSearcher) {
+                       @Value("${tavily.api-key}") String tavilyApiKey) {
         this.chatClient = chatClientBuilder.build();
         this.vectorStore = vectorStore;
         this.sessionRepository = sessionRepository;
         this.messageRepository = messageRepository;
-        this.tavilyWebSearcher = tavilyWebSearcher;
+        this.tavilyWebSearchTool = new TavilyWebSearchTool(tavilyApiKey);
     }
 
-    @Transactional
-    public Flux<String> processAndStreamMessage(Long sessionId, String userText) {
-        // 1. Fetch session and save the user's message immediately
+    public Flux<String> processAndStreamMessage(Long sessionId, String userText, String username) {
+
         ChatSession session = sessionRepository.findById(sessionId)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Session not found"));
+
+        // FIX: Dynamically update the session title in the database on the first message
+        if (session.getTitle() == null || session.getTitle().equals("New Chat")) {
+            String newTitle = userText.length() > 25 ? userText.substring(0, 25) + "..." : userText;
+            session.setTitle(newTitle);
+            sessionRepository.save(session);
+        }
 
         ChatMessage userMessage = new ChatMessage();
         userMessage.setSession(session);
@@ -58,12 +63,27 @@ public class ChatService {
         userMessage.setSender("USER");
         messageRepository.save(userMessage);
 
-        // 2. RAG Retrieval
+        List<ChatMessage> chatHistory = messageRepository.findBySessionIdOrderByIdAsc(sessionId);
+
+        StringBuilder historyBuilder = new StringBuilder();
+        if (chatHistory.size() > 1) {
+            historyBuilder.append("--- RECENT CONVERSATION HISTORY ---\n");
+            int startIndex = Math.max(0, chatHistory.size() - 11);
+
+            for (int i = startIndex; i < chatHistory.size() - 1; i++) {
+                ChatMessage msg = chatHistory.get(i);
+                String role = "USER".equalsIgnoreCase(msg.getSender()) ? username : "AI";
+                historyBuilder.append(role).append(": ").append(msg.getText()).append("\n\n");
+            }
+            historyBuilder.append("--- END OF HISTORY ---\n\n");
+        }
+
+        String contextualQuestion = "System Note: The current user you are speaking to is named '" + username + "'.\n\n"
+                + historyBuilder.toString()
+                + username + " asks: " + userText;
+
         List<Document> similarDocuments = vectorStore.similaritySearch(
-                SearchRequest.builder()
-                        .query(userText)
-                        .topK(3)
-                        .build()
+                SearchRequest.builder().query(userText).topK(3).build()
         );
 
         String documentContext = similarDocuments.stream()
@@ -73,26 +93,30 @@ public class ChatService {
         PromptTemplate promptTemplate = new PromptTemplate(ragPromptTemplate);
         String finalPrompt = promptTemplate.render(Map.of(
                 "context", documentContext,
-                "question", userText
+                "question", contextualQuestion
         ));
 
-        // 3. StringBuilder to collect chunks as they stream to the user
         StringBuilder fullBotResponse = new StringBuilder();
 
-        // 4. Stream the response
         return chatClient.prompt()
                 .user(finalPrompt)
-                .tools(tavilyWebSearcher)
+                .tools(this.tavilyWebSearchTool)
                 .stream()
                 .content()
-                .doOnNext(fullBotResponse::append) // Add each chunk to our builder as it passes through
+                .doOnNext(fullBotResponse::append)
                 .doOnComplete(() -> {
-                    // 5. Save the complete message to the database once the stream finishes
-                    ChatMessage botMessage = new ChatMessage();
-                    botMessage.setSession(session);
-                    botMessage.setText(fullBotResponse.toString());
-                    botMessage.setSender("BOT");
-                    messageRepository.save(botMessage);
+                    try {
+                        ChatSession freshSession = sessionRepository.findById(sessionId).orElse(null);
+                        if (freshSession != null) {
+                            ChatMessage botMessage = new ChatMessage();
+                            botMessage.setSession(freshSession);
+                            botMessage.setText(fullBotResponse.toString());
+                            botMessage.setSender("BOT");
+                            messageRepository.save(botMessage);
+                        }
+                    } catch (Exception e) {
+                        System.err.println("Error saving AI message: " + e.getMessage());
+                    }
                 });
     }
 }

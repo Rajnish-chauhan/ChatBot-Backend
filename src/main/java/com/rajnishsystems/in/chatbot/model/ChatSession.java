@@ -3,6 +3,7 @@ package com.rajnishsystems.in.chatbot.model;
 import com.fasterxml.jackson.annotation.JsonIgnore;
 import jakarta.persistence.*;
 
+import java.util.ArrayList;
 import java.util.List;
 
 @Entity
@@ -21,7 +22,7 @@ public class ChatSession {
     private User user;
 
     @OneToMany(mappedBy = "session", cascade = CascadeType.ALL, orphanRemoval = true)
-    private List<ChatMessage> messages;
+    private List<ChatMessage> messages = new ArrayList<>();
 
     public Long getId() { return id; }
     public void setId(Long id) { this.id = id; }
@@ -29,4 +30,8 @@ public class ChatSession {
     public void setTitle(String title) { this.title = title; }
     public User getUser() { return user; }
     public void setUser(User user) { this.user = user; }
+
+    // CRITICAL FIX: Getters and setters for Jackson serialization
+    public List<ChatMessage> getMessages() { return messages; }
+    public void setMessages(List<ChatMessage> messages) { this.messages = messages; }
 }

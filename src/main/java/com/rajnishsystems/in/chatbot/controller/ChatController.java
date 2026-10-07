@@ -48,20 +48,20 @@ public class ChatController {
         return ResponseEntity.ok(sessionRepository.save(sessionRequest));
     }
 
-    // New Server-Sent Events (SSE) Streaming Endpoint
     @PostMapping(value = "/{sessionId}/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
     public Flux<String> streamMessageRealTime(@AuthenticationPrincipal UserDetails userDetails,
                                               @PathVariable Long sessionId,
                                               @RequestBody ChatRequest request) {
         User user = getUser(userDetails);
 
-        // Security check to ensure the user owns this session
-        sessionRepository.findById(sessionId)
-                .filter(s -> s.getUser().getId().equals(user.getId()))
-                .orElseThrow(() -> new ResponseStatusException(HttpStatus.FORBIDDEN, "Access denied to this session"));
+        List<ChatSession> userSessions = sessionRepository.findByUserOrderByIdAsc(user);
+        boolean ownsSession = userSessions.stream().anyMatch(s -> s.getId().equals(sessionId));
 
-        // Trigger the reactive streaming service
-        return chatService.processAndStreamMessage(sessionId, request.text());
+        if (!ownsSession) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Access denied to this session");
+        }
+
+        return chatService.processAndStreamMessage(sessionId, request.text(), user.getUsername());
     }
 
     private User getUser(UserDetails userDetails) {

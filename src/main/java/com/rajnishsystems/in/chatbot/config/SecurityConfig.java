@@ -46,11 +46,9 @@ public class SecurityConfig {
                 .csrf(AbstractHttpConfigurer::disable)
                 .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authorizeHttpRequests(auth -> auth
-                        // CRITICAL FIX: Allow Spring to run the ASYNC streaming thread without re-authenticating
                         .dispatcherTypeMatchers(DispatcherType.ASYNC).permitAll()
-
                         .requestMatchers(HttpMethod.OPTIONS, "/**").permitAll()
-                        .requestMatchers("/api/auth/send-otp", "/api/auth/register-with-otp", "/api/auth/login", "/api/auth/guest").permitAll()
+                        .requestMatchers("/api/auth/send-otp", "/api/auth/register-with-otp", "/api/auth/login", "/api/auth/guest", "/api/auth/check-email").permitAll()
                         .requestMatchers("/swagger-ui/**", "/v3/api-docs/**", "/privacy-policy").permitAll()
                         .anyRequest().authenticated()
                 )

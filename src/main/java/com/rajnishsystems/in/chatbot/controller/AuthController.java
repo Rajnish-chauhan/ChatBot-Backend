@@ -17,6 +17,7 @@ import org.springframework.web.bind.annotation.*;
 import org.springframework.web.server.ResponseStatusException;
 
 import java.util.ArrayList;
+import java.util.Map;
 import java.util.UUID;
 
 @RestController
@@ -41,13 +42,25 @@ public class AuthController {
         this.otpService = otpService;
     }
 
+    @GetMapping("/check-email")
+    public ResponseEntity<Map<String, Boolean>> checkEmail(@RequestParam String email) {
+        if (email == null || email.isBlank()) {
+            return ResponseEntity.ok(Map.of("exists", false));
+        }
+        boolean exists = userRepository.existsByEmail(email.trim().toLowerCase());
+        return ResponseEntity.ok(Map.of("exists", exists));
+    }
+
     @PostMapping("/send-otp")
     public ResponseEntity<String> sendOtp(@RequestBody SendOtpRequest request) {
         if (request.email() == null || request.email().isBlank()) {
             return ResponseEntity.badRequest().body("Email is required.");
         }
+        if (userRepository.existsByEmail(request.email().trim().toLowerCase())) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Email already linked to another account.");
+        }
         otpService.sendOtp(request.email().trim());
-        return ResponseEntity.ok("OTP sent successfully to " + request.email());
+        return ResponseEntity.ok("OTP sent successfully");
     }
 
     @PostMapping("/register-with-otp")
@@ -55,11 +68,9 @@ public class AuthController {
         if (!otpService.verifyOtp(request.email(), request.otp())) {
             return ResponseEntity.status(HttpStatus.BAD_REQUEST).body("Invalid or expired OTP code.");
         }
-
         if (userRepository.existsByUsername(request.username())) {
             return ResponseEntity.badRequest().body("Username is already taken.");
         }
-
         if (userRepository.existsByEmail(request.email())) {
             return ResponseEntity.badRequest().body("Email is already registered.");
         }
@@ -145,11 +156,9 @@ public class AuthController {
         if (!otpService.verifyOtp(request.email(), request.otp())) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Invalid or expired OTP code.");
         }
-
         if (userRepository.existsByEmail(request.email())) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Email already linked to another account.");
         }
-
         if (userRepository.existsByUsername(request.username())) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Username already taken.");
         }
