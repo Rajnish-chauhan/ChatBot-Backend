@@ -1,18 +1,22 @@
-version: '3.8'
-
 services:
-  pgvector-db:
-    image: pgvector/pgvector:pg16
-    container_name: local-pgvector
-    restart: unless-stopped
+  postgres:
+    image: ankane/pgvector:latest
+    container_name: chatbot
     environment:
-      POSTGRES_DB: vectordb
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: password
+      POSTGRES_USER: root
+      POSTGRES_PASSWORD: root
+      POSTGRES_DB: vector-db
     ports:
       - "5432:5432"
     volumes:
-      - pgdata:/var/lib/postgresql/data
+      - pg_data:/var/lib/postgresql/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U root -d vector-db"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
 
 volumes:
-  pgdata:
+  pg_data:
+    name: chatbot_pg_data
