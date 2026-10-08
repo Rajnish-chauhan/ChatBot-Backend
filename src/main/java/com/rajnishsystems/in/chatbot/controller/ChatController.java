@@ -12,6 +12,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.multipart.MultipartFile;
 import org.springframework.web.server.ResponseStatusException;
 import reactor.core.publisher.Flux;
 
@@ -48,20 +49,34 @@ public class ChatController {
         return ResponseEntity.ok(sessionRepository.save(sessionRequest));
     }
 
-    @PostMapping(value = "/{sessionId}/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
-    public Flux<String> streamMessageRealTime(@AuthenticationPrincipal UserDetails userDetails,
+    // 1. Agar frontend se MULTIPART data aaye (File + Text dono ke sath)
+    @PostMapping(value = "/{sessionId}/stream", consumes = MediaType.MULTIPART_FORM_DATA_VALUE, produces = MediaType.TEXT_EVENT_STREAM_VALUE)
+    public Flux<String> streamMessageWithFile(@AuthenticationPrincipal UserDetails userDetails,
+                                              @PathVariable Long sessionId,
+                                              @RequestParam("text") String text,
+                                              @RequestPart(value = "file", required = false) MultipartFile file) {
+        User user = getUser(userDetails);
+        validateSessionOwnership(user, sessionId);
+        return chatService.processAndStreamMessage(sessionId, text, file, user.getUsername());
+    }
+
+    // 2. Agar frontend se normal JSON request aaye (sirf Text, bina file ke)
+    @PostMapping(value = "/{sessionId}/stream", consumes = MediaType.APPLICATION_JSON_VALUE, produces = MediaType.TEXT_EVENT_STREAM_VALUE)
+    public Flux<String> streamMessageJsonOnly(@AuthenticationPrincipal UserDetails userDetails,
                                               @PathVariable Long sessionId,
                                               @RequestBody ChatRequest request) {
         User user = getUser(userDetails);
+        validateSessionOwnership(user, sessionId);
+        return chatService.processAndStreamMessage(sessionId, request.text(), null, user.getUsername());
+    }
 
+    private void validateSessionOwnership(User user, Long sessionId) {
         List<ChatSession> userSessions = sessionRepository.findByUserOrderByIdAsc(user);
         boolean ownsSession = userSessions.stream().anyMatch(s -> s.getId().equals(sessionId));
 
         if (!ownsSession) {
             throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Access denied to this session");
         }
-
-        return chatService.processAndStreamMessage(sessionId, request.text(), user.getUsername());
     }
 
     private User getUser(UserDetails userDetails) {

@@ -6,7 +6,7 @@ import org.springframework.web.client.RestClient;
 import java.util.Map;
 
 public class TavilyWebSearchTool {
-
+// finds realtime data from web
     private final String apiKey;
 
     public TavilyWebSearchTool(String apiKey) {

@@ -1,7 +1,7 @@
 services:
   postgres:
     image: ankane/pgvector:latest
-    container_name: chatbot
+    container_name: chatbot_db
     environment:
       POSTGRES_USER: root
       POSTGRES_PASSWORD: root
@@ -16,6 +16,16 @@ services:
       interval: 5s
       timeout: 5s
       retries: 5
+
+
+  backend:
+    build: .
+    container_name: chatbot_app
+    ports:
+      - "8080:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
 
 volumes:
   pg_data:
