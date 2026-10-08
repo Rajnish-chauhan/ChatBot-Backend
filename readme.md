@@ -33,9 +33,9 @@ An enterprise-grade, full-stack AI Chatbot integrating **Retrieval-Augmented Gen
 | <img src="docs/login.png" width="300" alt="Login Screen"/> | <img src="docs/registerviaotp.png" width="300" alt="OTP Registration"/> | <img src="docs/guest.png" width="300" alt="Guest Login"/> |
 
 ### AI Interaction & Data Management
-|                  Multimodal Chat Interface                   | Account Deletion (Danger Zone) |                 Vector Database (Pgvector)                 |
-|:------------------------------------------------------------:|:---:|:----------------------------------------------------------:|
-| <img src="docs/login.png" width="300" alt="Chat Interface"/> | <img src="docs/delete.png" width="300" alt="Delete Modal"/> | <img src="docs/db.png" width="300" alt="Database Schema"/> |
+|                   Multimodal Chat Interface                   | Account Deletion (Danger Zone) |                 Vector Database (Pgvector)                 |
+|:-------------------------------------------------------------:|:---:|:----------------------------------------------------------:|
+| <img src="docs/chatai.png" width="300" alt="Chat Interface"/> | <img src="docs/delete.png" width="300" alt="Delete Modal"/> | <img src="docs/db.png" width="300" alt="Database Schema"/> |
 
 ---
 
