@@ -59,7 +59,7 @@ An enterprise-grade, full-stack AI Chatbot integrating **Retrieval-Augmented Gen
 ## Getting Started
 
 ### Prerequisites
-* Java 21+
+* **Java 21+**
 * Node.js & npm (Latest LTS recommended)
 * Docker (for PostgreSQL + Pgvector)
 * API Keys for OpenAI and Tavily Search
