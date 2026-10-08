@@ -49,18 +49,18 @@ public class ChatController {
         return ResponseEntity.ok(sessionRepository.save(sessionRequest));
     }
 
-    // 1. Agar frontend se MULTIPART data aaye (File + Text dono ke sath)
+    // MULTIPART data (Multiple Files + Text)
     @PostMapping(value = "/{sessionId}/stream", consumes = MediaType.MULTIPART_FORM_DATA_VALUE, produces = MediaType.TEXT_EVENT_STREAM_VALUE)
     public Flux<String> streamMessageWithFile(@AuthenticationPrincipal UserDetails userDetails,
                                               @PathVariable Long sessionId,
                                               @RequestParam("text") String text,
-                                              @RequestPart(value = "file", required = false) MultipartFile file) {
+                                              @RequestPart(value = "files", required = false) List<MultipartFile> files) {
         User user = getUser(userDetails);
         validateSessionOwnership(user, sessionId);
-        return chatService.processAndStreamMessage(sessionId, text, file, user.getUsername());
+        return chatService.processAndStreamMessage(sessionId, text, files, user.getUsername());
     }
 
-    // 2. Agar frontend se normal JSON request aaye (sirf Text, bina file ke)
+    // JSON request (Only Text)
     @PostMapping(value = "/{sessionId}/stream", consumes = MediaType.APPLICATION_JSON_VALUE, produces = MediaType.TEXT_EVENT_STREAM_VALUE)
     public Flux<String> streamMessageJsonOnly(@AuthenticationPrincipal UserDetails userDetails,
                                               @PathVariable Long sessionId,

@@ -23,6 +23,7 @@ import org.springframework.web.multipart.MultipartFile;
 import org.springframework.web.server.ResponseStatusException;
 import reactor.core.publisher.Flux;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
@@ -39,6 +40,9 @@ public class ChatService {
     @Value("classpath:prompts/promptTemplate.st")
     private Resource ragPromptTemplate;
 
+    // Custom record to avoid Spring AI 'Media' version conflict
+    private record ImageAttachment(MimeType mimeType, Resource resource) {}
+
     public ChatService(ChatClient.Builder chatClientBuilder,
                        VectorStore vectorStore,
                        ChatSessionRepository sessionRepository,
@@ -51,7 +55,7 @@ public class ChatService {
         this.tavilyWebSearchTool = new TavilyWebSearchTool(tavilyApiKey);
     }
 
-    public Flux<String> processAndStreamMessage(Long sessionId, String userText, MultipartFile file, String username) {
+    public Flux<String> processAndStreamMessage(Long sessionId, String userText, List<MultipartFile> files, String username) {
 
         ChatSession session = sessionRepository.findById(sessionId)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Session not found"));
@@ -62,29 +66,29 @@ public class ChatService {
             sessionRepository.save(session);
         }
 
-        // Database me user message save karna
+        // Save User Message
         ChatMessage userMessageEntity = new ChatMessage();
         userMessageEntity.setSession(session);
         String savedText = userText;
-        if (file != null && !file.isEmpty()) {
-            savedText += " [Attached File: " + file.getOriginalFilename() + "]";
+        if (files != null && !files.isEmpty()) {
+            savedText += " [Attached " + files.size() + " Files]";
         }
         userMessageEntity.setText(savedText);
         userMessageEntity.setSender("USER");
         messageRepository.save(userMessageEntity);
 
-        // Recent conversation history fetch karna
+        // Fetch Recent History (Memory Context)
         List<ChatMessage> chatHistory = messageRepository.findBySessionIdOrderByIdAsc(sessionId);
         StringBuilder historyBuilder = new StringBuilder();
         if (chatHistory.size() > 1) {
-            historyBuilder.append("--- RECENT CONVERSATION HISTORY ---\n");
-            int startIndex = Math.max(0, chatHistory.size() - 11);
+            historyBuilder.append("--- PREVIOUS CONVERSATION CONTEXT (REMEMBER THIS FOR CONTINUITY) ---\n");
+            int startIndex = Math.max(0, chatHistory.size() - 11); // Last 10 messages
             for (int i = startIndex; i < chatHistory.size() - 1; i++) {
                 ChatMessage msg = chatHistory.get(i);
                 String role = "USER".equalsIgnoreCase(msg.getSender()) ? username : "AI";
                 historyBuilder.append(role).append(": ").append(msg.getText()).append("\n\n");
             }
-            historyBuilder.append("--- END OF HISTORY ---\n\n");
+            historyBuilder.append("--- END OF PREVIOUS CONVERSATION ---\n\n");
         }
 
         // 1. Vector Database RAG search
@@ -95,98 +99,73 @@ public class ChatService {
                 .map(Document::getText)
                 .collect(Collectors.joining("\n\n"));
 
-        // 2. Uploaded File Processing
-        boolean isImage = false;
-        MimeType imageMimeType = null;
-        Resource imageResource = null;
+        // 2. Uploaded Files Processing (Multiple files)
+        List<ImageAttachment> imageAttachments = new ArrayList<>();
 
-        if (file != null && !file.isEmpty()) {
-            try {
-                String originalFilename = file.getOriginalFilename() != null ? file.getOriginalFilename().toLowerCase() : "";
-                String contentType = file.getContentType() != null ? file.getContentType().toLowerCase() : "";
+        if (files != null && !files.isEmpty()) {
+            for (MultipartFile file : files) {
+                try {
+                    String originalFilename = file.getOriginalFilename() != null ? file.getOriginalFilename().toLowerCase() : "";
+                    String contentType = file.getContentType() != null ? file.getContentType().toLowerCase() : "";
 
-                Resource fileResource = new ByteArrayResource(file.getBytes()) {
-                    @Override
-                    public String getFilename() {
-                        return file.getOriginalFilename();
-                    }
-                };
+                    Resource fileResource = new ByteArrayResource(file.getBytes()) {
+                        @Override
+                        public String getFilename() { return file.getOriginalFilename(); }
+                    };
 
-                // Video ya Audio files ko reject karna
-                if (contentType.startsWith("video/") || contentType.startsWith("audio/") ||
-                        originalFilename.endsWith(".mp4") || originalFilename.endsWith(".mp3") || originalFilename.endsWith(".wav") || originalFilename.endsWith(".mkv")) {
-                    documentContext += "\n\n--- UPLOADED FILE STATUS ---\n[SYSTEM NOTE: User ne audio ya video file upload ki hai. Please politely inform karein ki aap video aur audio files process nahi kar sakte.]";
+                    if (contentType.startsWith("video/") || contentType.startsWith("audio/") ||
+                            originalFilename.endsWith(".mp4") || originalFilename.endsWith(".mp3") || originalFilename.endsWith(".wav")) {
+                        documentContext += "\n\n[SYSTEM NOTE: User tried to upload audio/video file (" + file.getOriginalFilename() + "). Politely inform them you only support images and docs.]";
 
-                    // Image processing (PNG, JPG, JPEG, WEBP)
-                } else if (contentType.startsWith("image/") || originalFilename.endsWith(".png") || originalFilename.endsWith(".jpg") || originalFilename.endsWith(".jpeg") || originalFilename.endsWith(".webp")) {
-                    isImage = true;
-                    if (originalFilename.endsWith(".png")) {
-                        imageMimeType = MimeTypeUtils.IMAGE_PNG;
+                    } else if (contentType.startsWith("image/") || originalFilename.endsWith(".png") || originalFilename.endsWith(".jpg") || originalFilename.endsWith(".jpeg") || originalFilename.endsWith(".webp")) {
+                        MimeType imageMimeType = originalFilename.endsWith(".png") ? MimeTypeUtils.IMAGE_PNG : MimeTypeUtils.IMAGE_JPEG;
+                        imageAttachments.add(new ImageAttachment(imageMimeType, fileResource));
+                        documentContext += "\n\n--- USER UPLOADED IMAGE --- (" + file.getOriginalFilename() + " - analyze this image carefully)";
+
+                    } else if (contentType.equals("application/pdf") || originalFilename.endsWith(".pdf")) {
+                        PagePdfDocumentReader pdfReader = new PagePdfDocumentReader(fileResource);
+                        String extractedText = pdfReader.get().stream().map(Document::getText).collect(Collectors.joining("\n"));
+                        documentContext += "\n\n--- DOCUMENT CONTENT FROM USER (" + file.getOriginalFilename() + ") ---\n" + extractedText;
+
                     } else {
-                        imageMimeType = MimeTypeUtils.IMAGE_JPEG;
+                        TikaDocumentReader documentReader = new TikaDocumentReader(fileResource);
+                        String extractedText = documentReader.get().stream().map(Document::getText).collect(Collectors.joining("\n"));
+                        documentContext += "\n\n--- DOCUMENT CONTENT FROM USER (" + file.getOriginalFilename() + ") ---\n" + extractedText;
                     }
-                    imageResource = fileResource;
-                    documentContext += "\n\n--- UPLOADED IMAGE NOTE ---\nUser ne ek image attach ki hai (" + file.getOriginalFilename() + "). Please image ke visual contents ko read aur analyze karke answer karein.";
-
-                    // PDF document processing
-                } else if (contentType.equals("application/pdf") || originalFilename.endsWith(".pdf")) {
-                    PagePdfDocumentReader pdfReader = new PagePdfDocumentReader(fileResource);
-                    List<Document> extractedDocs = pdfReader.get();
-                    String extractedText = extractedDocs.stream()
-                            .map(Document::getText)
-                            .collect(Collectors.joining("\n"));
-
-                    documentContext += "\n\n--- UPLOADED PDF CONTENT (" + file.getOriginalFilename() + ") ---\n" + extractedText;
-
-                    // Baaki documents (TXT, DOCX, CSV)
-                } else {
-                    TikaDocumentReader documentReader = new TikaDocumentReader(fileResource);
-                    List<Document> extractedDocs = documentReader.get();
-                    String extractedText = extractedDocs.stream()
-                            .map(Document::getText)
-                            .collect(Collectors.joining("\n"));
-
-                    documentContext += "\n\n--- UPLOADED FILE CONTENT (" + file.getOriginalFilename() + ") ---\n" + extractedText;
+                } catch (Exception e) {
+                    System.err.println("File parsing error: " + e.getMessage());
                 }
-
-            } catch (Exception e) {
-                System.err.println("File parsing error: " + e.getMessage());
-                documentContext += "\n\n--- SYSTEM ERROR ---\nUploaded file read karne me dikkat aayi: " + e.getMessage();
             }
         }
 
-        // 3. System Prompt render karna
+        // 3. Render System Prompt
         SystemPromptTemplate promptTemplate = new SystemPromptTemplate(ragPromptTemplate);
         String renderedSystemPrompt = promptTemplate.render(Map.of(
                 "context", documentContext,
                 "question", userText
         ));
 
-        // 4. User Question prompt build karna
-        String tempPromptText = "System Note: User ka naam '" + username + "' hai.\n"
+        // 4. Build Final User Prompt
+        String tempPromptText = "System Note: User name is '" + username + "'. Use the previous conversation context to remember past interactions.\n\n"
                 + historyBuilder.toString()
                 + username + " asks: " + userText;
 
-        if (file != null && !file.isEmpty()) {
-            tempPromptText += "\n(Note: User ne upar di gayi file/image ke baare me pucha hai, context ko prioritize karke explain karein.)";
+        if (files != null && !files.isEmpty()) {
+            tempPromptText += "\n(Note: Prioritize your answer based on the " + files.size() + " attached files and images).";
         }
 
-        // FIX: Copy to a final variable so it can be used in the lambda expression safely
         final String finalUserPromptText = tempPromptText;
 
         // 5. Spring AI ChatClient stream call
         StringBuilder fullBotResponse = new StringBuilder();
-        final boolean finalIsImage = isImage;
-        final MimeType finalImageMimeType = imageMimeType;
-        final Resource finalImageResource = imageResource;
 
         return chatClient.prompt()
                 .system(renderedSystemPrompt)
                 .tools(this.tavilyWebSearchTool)
                 .user(u -> {
                     u.text(finalUserPromptText);
-                    if (finalIsImage) {
-                        u.media(finalImageMimeType, finalImageResource);
+                    for (ImageAttachment img : imageAttachments) {
+                        u.media(img.mimeType(), img.resource());
                     }
                 })
                 .stream()

@@ -25,8 +25,6 @@ An enterprise-grade, full-stack AI Chatbot integrating **Retrieval-Augmented Gen
 
 ## Application Gallery
 
-*(Note: Replace `docs/...` with the actual file paths of your uploaded images in the repository)*
-
 ### Authentication & Access
 | Standard Login | OTP Registration | Guest Mode Access |
 |:---:|:---:|:---:|

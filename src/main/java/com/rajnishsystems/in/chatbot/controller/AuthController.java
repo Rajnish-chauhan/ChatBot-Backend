@@ -8,6 +8,7 @@ import com.rajnishsystems.in.chatbot.service.OtpService;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.authentication.AuthenticationManager;
+import org.springframework.security.authentication.BadCredentialsException;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
@@ -57,7 +58,7 @@ public class AuthController {
             return ResponseEntity.badRequest().body("Email is required.");
         }
         if (userRepository.existsByEmail(request.email().trim().toLowerCase())) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Email already linked to another account.");
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "This email is already registered. Please log in.");
         }
         otpService.sendOtp(request.email().trim());
         return ResponseEntity.ok("OTP sent successfully");
@@ -69,7 +70,7 @@ public class AuthController {
             return ResponseEntity.status(HttpStatus.BAD_REQUEST).body("Invalid or expired OTP code.");
         }
         if (userRepository.existsByUsername(request.username())) {
-            return ResponseEntity.badRequest().body("Username is already taken.");
+            return ResponseEntity.badRequest().body("This username is already taken. Please choose a different one.");
         }
         if (userRepository.existsByEmail(request.email())) {
             return ResponseEntity.badRequest().body("Email is already registered.");
@@ -93,16 +94,21 @@ public class AuthController {
 
     @PostMapping("/login")
     public ResponseEntity<AuthResponse> login(@RequestBody AuthRequest request) {
-        Authentication auth = authenticationManager.authenticate(
-                new UsernamePasswordAuthenticationToken(request.username(), request.password())
-        );
+        try {
+            Authentication auth = authenticationManager.authenticate(
+                    new UsernamePasswordAuthenticationToken(request.username(), request.password())
+            );
 
-        UserDetails userDetails = (UserDetails) auth.getPrincipal();
-        User user = userRepository.findByUsername(userDetails.getUsername())
-                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "User not found"));
+            UserDetails userDetails = (UserDetails) auth.getPrincipal();
+            User user = userRepository.findByUsername(userDetails.getUsername())
+                    .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "User not found"));
 
-        String token = jwtUtils.generateToken(userDetails);
-        return ResponseEntity.ok(new AuthResponse(token, user.getUsername(), !user.isPasswordSet(), user.isGuest()));
+            String token = jwtUtils.generateToken(userDetails);
+            return ResponseEntity.ok(new AuthResponse(token, user.getUsername(), !user.isPasswordSet(), user.isGuest()));
+
+        } catch (BadCredentialsException e) {
+            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Invalid username or password. Please verify your credentials and try again.");
+        }
     }
 
     @PostMapping("/guest")
@@ -131,7 +137,7 @@ public class AuthController {
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.UNAUTHORIZED, "User not found"));
 
         if (!user.getUsername().equals(request.username()) && userRepository.existsByUsername(request.username())) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Username already taken");
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "This username is already taken. Please choose a different one.");
         }
 
         user.setUsername(request.username());
@@ -160,7 +166,7 @@ public class AuthController {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Email already linked to another account.");
         }
         if (userRepository.existsByUsername(request.username())) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Username already taken.");
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "This username is already taken. Please choose a different one.");
         }
 
         guestUser.setEmail(request.email().toLowerCase());
