@@ -27,24 +27,30 @@ public class OtpService {
     }
 
     public void sendOtp(String email) {
+        String cleanEmail = email.toLowerCase().trim();
         String otp = String.format("%06d", new SecureRandom().nextInt(1_000_000));
-        otpStorage.put(email.toLowerCase(), new OtpData(otp, Instant.now().plusSeconds(OTP_VALIDITY_SECONDS)));
+        otpStorage.put(cleanEmail, new OtpData(otp, Instant.now().plusSeconds(OTP_VALIDITY_SECONDS)));
 
         try {
             SimpleMailMessage message = new SimpleMailMessage();
-            message.setTo(email);
+            message.setTo(cleanEmail);
             message.setSubject("Your ChatBot Verification Code");
             message.setText("Welcome to ChatBot!\n\nYour 6-digit OTP code is: " + otp + "\n\nThis code expires in 5 minutes. Do not share this code with anyone.");
             mailSender.send(message);
-            log.info("OTP successfully sent to email: {}", email);
+            log.info("OTP successfully sent to email: {}", cleanEmail);
         } catch (Exception e) {
-            log.error("Failed to send OTP email to {}: {}", email, e.getMessage());
+            log.error("Failed to send OTP email to {}: {}", cleanEmail, e.getMessage());
             throw new RuntimeException("Could not send verification email. Please check your email configuration.");
         }
     }
 
+    // Validates the OTP without deleting it immediately so registration retries work
     public boolean verifyOtp(String email, String inputOtp) {
-        String cleanEmail = email.toLowerCase();
+        if (email == null || inputOtp == null) {
+            return false;
+        }
+
+        String cleanEmail = email.toLowerCase().trim();
         OtpData data = otpStorage.get(cleanEmail);
 
         if (data == null) {
@@ -56,10 +62,13 @@ public class OtpService {
             return false;
         }
 
-        boolean isValid = data.otp().equals(inputOtp.trim());
-        if (isValid) {
-            otpStorage.remove(cleanEmail);
+        return data.otp().equals(inputOtp.trim());
+    }
+
+    // Clears the OTP only after the user has been successfully registered or saved
+    public void clearOtp(String email) {
+        if (email != null) {
+            otpStorage.remove(email.toLowerCase().trim());
         }
-        return isValid;
     }
 }

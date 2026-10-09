@@ -18,6 +18,8 @@ import org.springframework.web.cors.CorsConfiguration;
 import org.springframework.web.cors.CorsConfigurationSource;
 import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
 
+import java.net.URLEncoder;
+import java.nio.charset.StandardCharsets;
 import java.util.List;
 
 @Configuration
@@ -44,16 +46,30 @@ public class SecurityConfig {
                 )
                 .cors(cors -> cors.configurationSource(corsConfigurationSource()))
                 .csrf(AbstractHttpConfigurer::disable)
-                .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
+                // Use IF_REQUIRED so OAuth2 can use a transient session during Google authorization handshake
+                .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.IF_REQUIRED))
                 .authorizeHttpRequests(auth -> auth
                         .dispatcherTypeMatchers(DispatcherType.ASYNC).permitAll()
                         .requestMatchers(HttpMethod.OPTIONS, "/**").permitAll()
-                        .requestMatchers("/api/auth/send-otp", "/api/auth/register-with-otp", "/api/auth/login", "/api/auth/guest", "/api/auth/check-email").permitAll()
-                        .requestMatchers("/swagger-ui/**", "/v3/api-docs/**", "/privacy-policy").permitAll()
+                        // Ensure all public endpoints are accessible without requiring JWT token
+                        .requestMatchers(
+                                "/api/auth/**",
+                                "/oauth2/**",
+                                "/login/**",
+                                "/error",
+                                "/swagger-ui/**",
+                                "/v3/api-docs/**",
+                                "/privacy-policy"
+                        ).permitAll()
                         .anyRequest().authenticated()
                 )
                 .oauth2Login(oauth2 -> oauth2
                         .successHandler(oAuth2LoginSuccessHandler)
+                        // If OAuth2 fails, redirect to frontend with error message instead of raw backend /login?error
+                        .failureHandler((request, response, exception) -> {
+                            String errorMsg = exception.getMessage() != null ? exception.getMessage() : "Google login failed";
+                            response.sendRedirect("http://localhost:5173/?error=" + URLEncoder.encode(errorMsg, StandardCharsets.UTF_8));
+                        })
                 );
 
         http.addFilterBefore(jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter.class);

@@ -66,23 +66,43 @@ public class AuthController {
 
     @PostMapping("/register-with-otp")
     public ResponseEntity<?> registerWithOtp(@RequestBody RegisterWithOtpRequest request) {
-        if (!otpService.verifyOtp(request.email(), request.otp())) {
-            return ResponseEntity.status(HttpStatus.BAD_REQUEST).body("Invalid or expired OTP code.");
+        if (request.email() == null || request.email().isBlank()) {
+            return ResponseEntity.badRequest().body("Email is required.");
         }
-        if (userRepository.existsByUsername(request.username())) {
-            return ResponseEntity.badRequest().body("This username is already taken. Please choose a different one.");
+        if (request.username() == null || request.username().isBlank()) {
+            return ResponseEntity.badRequest().body("Username is required.");
         }
-        if (userRepository.existsByEmail(request.email())) {
-            return ResponseEntity.badRequest().body("Email is already registered.");
+        if (request.password() == null || request.password().isBlank()) {
+            return ResponseEntity.badRequest().body("Password is required.");
         }
 
+        String cleanEmail = request.email().trim().toLowerCase();
+        String cleanUsername = request.username().trim();
+
+        // 1. Validate email and username existence before consuming OTP
+        if (userRepository.existsByEmail(cleanEmail)) {
+            return ResponseEntity.badRequest().body("Email is already registered. Please log in.");
+        }
+        if (userRepository.existsByUsername(cleanUsername)) {
+            return ResponseEntity.badRequest().body("This username is already taken. Please choose a different one.");
+        }
+
+        // 2. Validate OTP code
+        if (!otpService.verifyOtp(cleanEmail, request.otp())) {
+            return ResponseEntity.status(HttpStatus.BAD_REQUEST).body("Invalid or expired OTP code.");
+        }
+
+        // 3. Persist new user
         User user = new User();
-        user.setEmail(request.email().toLowerCase());
-        user.setUsername(request.username());
+        user.setEmail(cleanEmail);
+        user.setUsername(cleanUsername);
         user.setPassword(passwordEncoder.encode(request.password()));
         user.setPasswordSet(true);
         user.setGuest(false);
         userRepository.save(user);
+
+        // 4. Safely clear OTP after successful account creation
+        otpService.clearOtp(cleanEmail);
 
         UserDetails userDetails = new org.springframework.security.core.userdetails.User(
                 user.getUsername(), user.getPassword(), new ArrayList<>()
@@ -159,22 +179,27 @@ public class AuthController {
         User guestUser = userRepository.findByUsername(userDetails.getUsername())
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Guest user not found"));
 
-        if (!otpService.verifyOtp(request.email(), request.otp())) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Invalid or expired OTP code.");
-        }
-        if (userRepository.existsByEmail(request.email())) {
+        String cleanEmail = request.email() != null ? request.email().trim().toLowerCase() : "";
+        String cleanUsername = request.username() != null ? request.username().trim() : "";
+
+        if (userRepository.existsByEmail(cleanEmail)) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Email already linked to another account.");
         }
-        if (userRepository.existsByUsername(request.username())) {
+        if (userRepository.existsByUsername(cleanUsername)) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "This username is already taken. Please choose a different one.");
         }
+        if (!otpService.verifyOtp(cleanEmail, request.otp())) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Invalid or expired OTP code.");
+        }
 
-        guestUser.setEmail(request.email().toLowerCase());
-        guestUser.setUsername(request.username());
+        guestUser.setEmail(cleanEmail);
+        guestUser.setUsername(cleanUsername);
         guestUser.setPassword(passwordEncoder.encode(request.password()));
         guestUser.setPasswordSet(true);
         guestUser.setGuest(false);
         userRepository.save(guestUser);
+
+        otpService.clearOtp(cleanEmail);
 
         UserDetails updatedDetails = new org.springframework.security.core.userdetails.User(
                 guestUser.getUsername(), guestUser.getPassword(), new ArrayList<>()
