@@ -1,6 +1,7 @@
 package com.rajnishsystems.in.chatbot.config;
 
 import jakarta.servlet.DispatcherType;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.http.HttpMethod;
@@ -20,6 +21,7 @@ import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
 
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
+import java.util.Arrays;
 import java.util.List;
 
 @Configuration
@@ -29,6 +31,12 @@ public class SecurityConfig {
     private final JwtAuthenticationFilter jwtAuthenticationFilter;
     private final OAuth2LoginSuccessHandler oAuth2LoginSuccessHandler;
     private final JwtAuthenticationEntryPoint authenticationEntryPoint;
+
+    @Value("${app.frontend.url:http://localhost:5173}")
+    private String frontendBaseUrl;
+
+    @Value("${app.cors.allowed-origins:http://localhost:5173}")
+    private String rawAllowedOrigins;
 
     public SecurityConfig(JwtAuthenticationFilter jwtAuthenticationFilter,
                           OAuth2LoginSuccessHandler oAuth2LoginSuccessHandler,
@@ -51,7 +59,7 @@ public class SecurityConfig {
                 .authorizeHttpRequests(auth -> auth
                         .dispatcherTypeMatchers(DispatcherType.ASYNC).permitAll()
                         .requestMatchers(HttpMethod.OPTIONS, "/**").permitAll()
-                        // Ensure all public endpoints are accessible without requiring JWT token
+                        // Ensure all public authentication and OAuth2 handshake routes are permitted
                         .requestMatchers(
                                 "/api/auth/**",
                                 "/oauth2/**",
@@ -65,10 +73,10 @@ public class SecurityConfig {
                 )
                 .oauth2Login(oauth2 -> oauth2
                         .successHandler(oAuth2LoginSuccessHandler)
-                        // If OAuth2 fails, redirect to frontend with error message instead of raw backend /login?error
+                        // Redirect OAuth failures gracefully to the frontend login page with error message
                         .failureHandler((request, response, exception) -> {
                             String errorMsg = exception.getMessage() != null ? exception.getMessage() : "Google login failed";
-                            response.sendRedirect("http://localhost:5173/?error=" + URLEncoder.encode(errorMsg, StandardCharsets.UTF_8));
+                            response.sendRedirect(frontendBaseUrl + "/?error=" + URLEncoder.encode(errorMsg, StandardCharsets.UTF_8));
                         })
                 );
 
@@ -90,7 +98,13 @@ public class SecurityConfig {
     @Bean
     public CorsConfigurationSource corsConfigurationSource() {
         CorsConfiguration config = new CorsConfiguration();
-        config.setAllowedOrigins(List.of("http://localhost:5173"));
+
+        // Support both localhost and production Vercel frontend domains dynamically
+        List<String> origins = Arrays.stream(rawAllowedOrigins.split(","))
+                .map(String::trim)
+                .toList();
+
+        config.setAllowedOrigins(origins);
         config.setAllowedMethods(List.of("GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"));
         config.setAllowedHeaders(List.of("Authorization", "Content-Type", "Accept"));
         config.setExposedHeaders(List.of("X-Rate-Limit-Remaining", "X-Rate-Limit-Retry-After-Seconds"));
