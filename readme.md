@@ -200,7 +200,7 @@ The web application will launch at `http://localhost:5173`.
 
 ---
 
-## Production Deployment & CI/CD
+
 
 ### Containerized Deployment (Docker Compose)
 Launch the unified multi-container system (Database, Backend API, and Nginx-proxied Frontend):
