@@ -27,7 +27,7 @@ public class OAuth2LoginSuccessHandler extends SimpleUrlAuthenticationSuccessHan
     private final JwtUtils jwtUtils;
     private final UserRepository userRepository;
 
-    // Dynamically injected frontend URL from application.properties / environment
+    // Dynamically injected frontend domain from application.properties or environment
     @Value("${app.frontend.url:http://localhost:5173}")
     private String frontendBaseUrl;
 
@@ -41,6 +41,7 @@ public class OAuth2LoginSuccessHandler extends SimpleUrlAuthenticationSuccessHan
         try {
             OAuth2User oAuth2User = (OAuth2User) authentication.getPrincipal();
 
+            // Extract email safely and convert to lowercase
             String email = oAuth2User.getAttribute("email");
             if (email == null || email.isBlank()) {
                 String login = oAuth2User.getAttribute("login");
@@ -48,6 +49,7 @@ public class OAuth2LoginSuccessHandler extends SimpleUrlAuthenticationSuccessHan
             }
             final String cleanEmail = email.trim().toLowerCase();
 
+            // Check if user already exists or create new user with a collision-free username
             User user = userRepository.findByEmail(cleanEmail).orElseGet(() -> {
                 User newUser = new User();
                 newUser.setEmail(cleanEmail);
@@ -59,12 +61,13 @@ public class OAuth2LoginSuccessHandler extends SimpleUrlAuthenticationSuccessHan
                 }
 
                 newUser.setUsername(candidateUsername);
-                newUser.setPassword(UUID.randomUUID().toString());
+                newUser.setPassword(UUID.randomUUID().toString()); // Placeholder password
                 newUser.setPasswordSet(false);
                 newUser.setGuest(false);
                 return userRepository.save(newUser);
             });
 
+            // Construct standard UserDetails for token generation
             org.springframework.security.core.userdetails.User userDetails =
                     new org.springframework.security.core.userdetails.User(
                             user.getUsername(),
@@ -74,7 +77,7 @@ public class OAuth2LoginSuccessHandler extends SimpleUrlAuthenticationSuccessHan
 
             String token = jwtUtils.generateToken(userDetails);
 
-            // Redirects to dynamic frontend URL (e.g. Vercel in production or localhost in development)
+            // Redirect back to frontend URL (e.g., https://chatbot.rajnishsystems.in in production)
             String frontendUrl = String.format("%s/oauth2/redirect?token=%s&username=%s&requiresPasswordSetup=%s",
                     frontendBaseUrl,
                     token,
