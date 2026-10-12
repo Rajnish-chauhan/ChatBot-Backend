@@ -1,5 +1,6 @@
 package com.rajnishsystems.in.chatbot.config;
 
+import com.rajnishsystems.in.chatbot.repository.UserRepository;
 import jakarta.servlet.DispatcherType;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
@@ -21,9 +22,13 @@ import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
 
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 
+/**
+ * Spring Security configuration enabling JWT filter, OAuth2 flow, and permissive CORS patterns.
+ */
 @Configuration
 @EnableWebSecurity
 public class SecurityConfig {
@@ -31,6 +36,7 @@ public class SecurityConfig {
     private final JwtAuthenticationFilter jwtAuthenticationFilter;
     private final OAuth2LoginSuccessHandler oAuth2LoginSuccessHandler;
     private final JwtAuthenticationEntryPoint authenticationEntryPoint;
+    private final UserRepository userRepository;
 
     @Value("${app.frontend.url:http://localhost:5173}")
     private String frontendBaseUrl;
@@ -40,10 +46,12 @@ public class SecurityConfig {
 
     public SecurityConfig(JwtAuthenticationFilter jwtAuthenticationFilter,
                           OAuth2LoginSuccessHandler oAuth2LoginSuccessHandler,
-                          JwtAuthenticationEntryPoint authenticationEntryPoint) {
+                          JwtAuthenticationEntryPoint authenticationEntryPoint,
+                          UserRepository userRepository) {
         this.jwtAuthenticationFilter = jwtAuthenticationFilter;
         this.oAuth2LoginSuccessHandler = oAuth2LoginSuccessHandler;
         this.authenticationEntryPoint = authenticationEntryPoint;
+        this.userRepository = userRepository;
     }
 
     @Bean
@@ -54,12 +62,10 @@ public class SecurityConfig {
                 )
                 .cors(cors -> cors.configurationSource(corsConfigurationSource()))
                 .csrf(AbstractHttpConfigurer::disable)
-                // Use IF_REQUIRED so OAuth2 can use a transient session during Google authorization handshake
                 .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.IF_REQUIRED))
                 .authorizeHttpRequests(auth -> auth
                         .dispatcherTypeMatchers(DispatcherType.ASYNC).permitAll()
                         .requestMatchers(HttpMethod.OPTIONS, "/**").permitAll()
-                        // Ensure all public authentication and OAuth2 handshake routes are permitted
                         .requestMatchers(
                                 "/api/auth/**",
                                 "/oauth2/**",
@@ -73,7 +79,6 @@ public class SecurityConfig {
                 )
                 .oauth2Login(oauth2 -> oauth2
                         .successHandler(oAuth2LoginSuccessHandler)
-                        // Redirect OAuth failures gracefully to the frontend login page with error message
                         .failureHandler((request, response, exception) -> {
                             String errorMsg = exception.getMessage() != null ? exception.getMessage() : "Google login failed";
                             response.sendRedirect(frontendBaseUrl + "/?error=" + URLEncoder.encode(errorMsg, StandardCharsets.UTF_8));
@@ -81,6 +86,7 @@ public class SecurityConfig {
                 );
 
         http.addFilterBefore(jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter.class);
+        http.addFilterAfter(new RateLimitFilter(userRepository), JwtAuthenticationFilter.class);
 
         return http.build();
     }
@@ -99,14 +105,21 @@ public class SecurityConfig {
     public CorsConfigurationSource corsConfigurationSource() {
         CorsConfiguration config = new CorsConfiguration();
 
-        // Support both localhost and production Vercel frontend domains dynamically
-        List<String> origins = Arrays.stream(rawAllowedOrigins.split(","))
-                .map(String::trim)
-                .toList();
+        // Allowed origin patterns supporting localhost ports, Vercel deployments, and production domains
+        List<String> originPatterns = new ArrayList<>(List.of(
+                "http://localhost:[*]",
+                "http://127.0.0.1:[*]",
+                "https://*.vercel.app",
+                "https://chatbot.rajnishsystems.in"
+        ));
 
-        config.setAllowedOrigins(origins);
+        if (rawAllowedOrigins != null && !rawAllowedOrigins.isBlank()) {
+            originPatterns.addAll(Arrays.stream(rawAllowedOrigins.split(",")).map(String::trim).toList());
+        }
+
+        config.setAllowedOriginPatterns(originPatterns);
         config.setAllowedMethods(List.of("GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"));
-        config.setAllowedHeaders(List.of("Authorization", "Content-Type", "Accept"));
+        config.setAllowedHeaders(List.of("Authorization", "Content-Type", "Accept", "X-Device-Id", "*"));
         config.setExposedHeaders(List.of("X-Rate-Limit-Remaining", "X-Rate-Limit-Retry-After-Seconds"));
         config.setAllowCredentials(true);
 

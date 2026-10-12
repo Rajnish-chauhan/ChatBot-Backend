@@ -39,45 +39,75 @@ public class RateLimitFilter extends OncePerRequestFilter {
     protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain filterChain)
             throws ServletException, IOException {
 
-        // 1. Only enforce rate limits on chat endpoints
-        if (!request.getRequestURI().startsWith("/api/chat")) {
+        String path = request.getRequestURI();
+        if (!path.startsWith("/api/chat/") || !path.endsWith("/stream")) {
             filterChain.doFilter(request, response);
             return;
         }
 
         Authentication auth = SecurityContextHolder.getContext().getAuthentication();
-        if (auth == null || !auth.isAuthenticated() || auth.getPrincipal().equals("anonymousUser")) {
+        if (auth == null || !auth.isAuthenticated() || "anonymousUser".equals(auth.getPrincipal())) {
             filterChain.doFilter(request, response);
             return;
         }
 
         String username = auth.getName();
+        User user = userRepository.findByUsername(username).orElse(null);
+        boolean isGuest = (user != null) && user.isGuest();
 
-        // 2. Fetch or create the user's bucket
-        Bucket bucket = userBuckets.computeIfAbsent(username, this::createNewBucket);
+        // Anti-Abuse Tracking Key:
+        // Registered users are bound to their unique registered username.
+        // Guests are strictly bound to their Client IP & Browser Device ID so clearing localStorage or re-guesting cannot bypass limits.
+        String rateLimitKey;
+        if (isGuest) {
+            String clientIp = extractClientIp(request);
+            String deviceId = request.getHeader("X-Device-Id");
+            rateLimitKey = "guest_limit:" + clientIp + ":" + (deviceId != null ? deviceId : "unknown_device");
+        } else {
+            rateLimitKey = "user_limit:" + username;
+        }
 
-        // 3. Consume a token and get the remaining count
+        long capacity = isGuest ? 10 : 20;
+        Bucket bucket = userBuckets.computeIfAbsent(rateLimitKey, k -> createNewBucket(capacity));
+
         ConsumptionProbe probe = bucket.tryConsumeAndReturnRemaining(1);
 
         if (probe.isConsumed()) {
-            // INTERNAL BACKEND MONITORING ONLY - Never sent to the frontend
-            log.info("API Call Successful | User: {} | Calls Remaining Today: {}", username, probe.getRemainingTokens());
-
+            response.addHeader("X-Rate-Limit-Remaining", String.valueOf(probe.getRemainingTokens()));
             filterChain.doFilter(request, response);
         } else {
-            log.warn("API Limit Reached | User: {}", username);
-
+            log.warn("Rate limit exhausted for key: {} (isGuest: {})", rateLimitKey, isGuest);
             response.setStatus(HttpStatus.TOO_MANY_REQUESTS.value());
-            response.getWriter().write("Daily limit reached. Please upgrade your account or try again tomorrow.");
+            response.setContentType("application/json");
+
+            String jsonResponse = isGuest
+                    ? "{\"error\": \"LIMIT_REACHED\", \"isGuest\": true, \"message\": \"Daily limit reached. Please create a free account or sign in to continue chatting.\"}"
+                    : "{\"error\": \"LIMIT_REACHED\", \"isGuest\": false, \"message\": \"Daily limit reached. Your quota will reset after 24 hours. Please try again tomorrow.\"}";
+
+            response.getWriter().write(jsonResponse);
         }
     }
 
-    private Bucket createNewBucket(String username) {
-        User user = userRepository.findByUsername(username).orElse(null);
+    // Resolves real client IP even behind Cloudflare and reverse proxies
+    private String extractClientIp(HttpServletRequest request) {
+        String ip = request.getHeader("CF-Connecting-IP");
+        if (ip == null || ip.isBlank() || "unknown".equalsIgnoreCase(ip)) {
+            ip = request.getHeader("X-Forwarded-For");
+            if (ip != null && !ip.isBlank()) {
+                ip = ip.split(",")[0].trim();
+            }
+        }
+        if (ip == null || ip.isBlank() || "unknown".equalsIgnoreCase(ip)) {
+            ip = request.getHeader("X-Real-IP");
+        }
+        if (ip == null || ip.isBlank() || "unknown".equalsIgnoreCase(ip)) {
+            ip = request.getRemoteAddr();
+        }
+        return (ip != null && !ip.isBlank()) ? ip : "127.0.0.1";
+    }
 
-        boolean isGuest = (user != null) && user.isGuest();
-        long capacity = isGuest ? 10 : 100;
-
+    private Bucket createNewBucket(long capacity) {
+        // Resets intervally every 24 hours
         Bandwidth limit = Bandwidth.classic(capacity, Refill.intervally(capacity, Duration.ofDays(1)));
         return Bucket.builder().addLimit(limit).build();
     }

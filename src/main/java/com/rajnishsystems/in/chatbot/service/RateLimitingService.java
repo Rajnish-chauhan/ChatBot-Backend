@@ -19,8 +19,8 @@ public class RateLimitingService {
     }
 
     private Bucket newBucket(String key) {
-        // 100 requests per 24 hours. Resets intervally after 24 hours.
-        Bandwidth limit = Bandwidth.classic(100, Refill.intervally(100, Duration.ofDays(1)));
+        // Daily rate limit of 20 requests per 24 hours. Resets intervally after 24 hours.
+        Bandwidth limit = Bandwidth.classic(20, Refill.intervally(20, Duration.ofDays(1)));
         return Bucket.builder()
                 .addLimit(limit)
                 .build();

@@ -15,7 +15,8 @@ import java.util.concurrent.ConcurrentHashMap;
 public class OtpService {
 
     private static final Logger log = LoggerFactory.getLogger(OtpService.class);
-    private static final long OTP_VALIDITY_SECONDS = 300; // 5 minutes
+    // 10 minutes validity window to prevent premature expirations
+    private static final long OTP_VALIDITY_SECONDS = 600;
 
     private final JavaMailSender mailSender;
     private final Map<String, OtpData> otpStorage = new ConcurrentHashMap<>();
@@ -35,16 +36,15 @@ public class OtpService {
             SimpleMailMessage message = new SimpleMailMessage();
             message.setTo(cleanEmail);
             message.setSubject("Your ChatBot Verification Code");
-            message.setText("Welcome to ChatBot!\n\nYour 6-digit OTP code is: " + otp + "\n\nThis code expires in 5 minutes. Do not share this code with anyone.");
+            message.setText("Welcome to ChatBot!\n\nYour 6-digit OTP code is: " + otp + "\n\nThis code expires in 10 minutes. Do not share this code with anyone.");
             mailSender.send(message);
             log.info("OTP successfully sent to email: {}", cleanEmail);
         } catch (Exception e) {
             log.error("Failed to send OTP email to {}: {}", cleanEmail, e.getMessage());
-            throw new RuntimeException("Could not send verification email. Please check your email configuration.");
+            throw new RuntimeException("Could not send verification email. Please check mail credentials.");
         }
     }
 
-    // Validates the OTP without deleting it immediately so registration retries work
     public boolean verifyOtp(String email, String inputOtp) {
         if (email == null || inputOtp == null) {
             return false;
@@ -65,7 +65,6 @@ public class OtpService {
         return data.otp().equals(inputOtp.trim());
     }
 
-    // Clears the OTP only after the user has been successfully registered or saved
     public void clearOtp(String email) {
         if (email != null) {
             otpStorage.remove(email.toLowerCase().trim());

@@ -29,6 +29,17 @@ public class User {
     @Column(nullable = false)
     private boolean isGuest = false;
 
+    @Column(columnDefinition = "TEXT")
+    private String profilePic;
+
+    // Permanent database-level default 0 (never throws null constraint errors)
+    @Column(name = "tokens_used", columnDefinition = "bigint default 0")
+    private Long tokensUsed = 0L;
+
+    // Permanent database-level default 0 (never throws null constraint errors)
+    @Column(name = "api_calls_count", columnDefinition = "bigint default 0")
+    private Long apiCallsCount = 0L;
+
     @OneToMany(mappedBy = "user", cascade = CascadeType.ALL, orphanRemoval = true)
     private List<ChatSession> sessions = new ArrayList<>();
 
@@ -49,6 +60,26 @@ public class User {
 
     public boolean isGuest() { return isGuest; }
     public void setGuest(boolean guest) { isGuest = guest; }
+
+    public String getProfilePic() { return profilePic; }
+    public void setProfilePic(String profilePic) { this.profilePic = profilePic; }
+
+    // Safe getters: Always guarantees a numeric value, never null
+    public Long getTokensUsed() {
+        return tokensUsed != null ? tokensUsed : 0L;
+    }
+
+    public void setTokensUsed(Long tokensUsed) {
+        this.tokensUsed = tokensUsed;
+    }
+
+    public Long getApiCallsCount() {
+        return apiCallsCount != null ? apiCallsCount : 0L;
+    }
+
+    public void setApiCallsCount(Long apiCallsCount) {
+        this.apiCallsCount = apiCallsCount;
+    }
 
     public List<ChatSession> getSessions() { return sessions; }
     public void setSessions(List<ChatSession> sessions) { this.sessions = sessions; }
