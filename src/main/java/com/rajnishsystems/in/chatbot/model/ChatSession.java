@@ -9,12 +9,16 @@ import java.util.List;
 @Entity
 @Table(name = "chat_sessions")
 public class ChatSession {
+
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
     @Column(nullable = false)
     private String title;
+
+    @Column(name = "username")
+    private String username;
 
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "user_id", nullable = false)
@@ -40,15 +44,25 @@ public class ChatSession {
         this.title = title;
     }
 
+    public String getUsername() {
+        return username;
+    }
+
+    public void setUsername(String username) {
+        this.username = username;
+    }
+
     public User getUser() {
         return user;
     }
 
     public void setUser(User user) {
         this.user = user;
+        if (user != null && user.getUsername() != null) {
+            this.username = user.getUsername();
+        }
     }
 
-    // CRITICAL FIX: Getters and setters for Jackson serialization
     public List<ChatMessage> getMessages() {
         return messages;
     }

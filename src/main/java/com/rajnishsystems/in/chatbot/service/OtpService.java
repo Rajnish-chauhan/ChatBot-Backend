@@ -15,8 +15,7 @@ import java.util.concurrent.ConcurrentHashMap;
 public class OtpService {
 
     private static final Logger log = LoggerFactory.getLogger(OtpService.class);
-    // 10 minutes validity window to prevent premature expirations
-    private static final long OTP_VALIDITY_SECONDS = 600;
+    private static final long OTP_VALIDITY_SECONDS = 600; // 10 minutes
 
     private final JavaMailSender mailSender;
     private final Map<String, OtpData> otpStorage = new ConcurrentHashMap<>();
@@ -28,6 +27,22 @@ public class OtpService {
     }
 
     public void sendOtp(String email) {
+        sendOtpEmail(
+                email,
+                "Your ChatBot Verification Code",
+                "Welcome to ChatBot!\n\nYour 6-digit verification OTP code is: %s\n\nThis code is valid for 10 minutes. Please do not share this code with anyone."
+        );
+    }
+
+    public void sendPasswordResetOtp(String email) {
+        sendOtpEmail(
+                email,
+                "ChatBot Password Reset Code",
+                "Hello,\n\nWe received a request to reset your ChatBot account password.\nYour 6-digit password reset OTP code is: %s\n\nThis code expires in 10 minutes. If you did not request a password reset, you can safely ignore this email."
+        );
+    }
+
+    private void sendOtpEmail(String email, String subject, String bodyTemplate) {
         String cleanEmail = email.toLowerCase().trim();
         String otp = String.format("%06d", new SecureRandom().nextInt(1_000_000));
         otpStorage.put(cleanEmail, new OtpData(otp, Instant.now().plusSeconds(OTP_VALIDITY_SECONDS)));
@@ -35,13 +50,13 @@ public class OtpService {
         try {
             SimpleMailMessage message = new SimpleMailMessage();
             message.setTo(cleanEmail);
-            message.setSubject("Your ChatBot Verification Code");
-            message.setText("Welcome to ChatBot!\n\nYour 6-digit OTP code is: " + otp + "\n\nThis code expires in 10 minutes. Do not share this code with anyone.");
+            message.setSubject(subject);
+            message.setText(String.format(bodyTemplate, otp));
             mailSender.send(message);
-            log.info("OTP successfully sent to email: {}", cleanEmail);
+            log.info("OTP email sent successfully to: {}", cleanEmail);
         } catch (Exception e) {
             log.error("Failed to send OTP email to {}: {}", cleanEmail, e.getMessage());
-            throw new RuntimeException("Could not send verification email. Please check mail credentials.");
+            throw new RuntimeException("Could not send verification email. Please verify mail configuration.");
         }
     }
 

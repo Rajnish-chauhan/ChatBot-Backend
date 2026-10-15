@@ -54,7 +54,6 @@ public class AuthController {
         this.otpService = otpService;
     }
 
-    // Real-time email availability check during registration
     @GetMapping("/check-email")
     public ResponseEntity<Map<String, Boolean>> checkEmail(@RequestParam String email) {
         if (email == null || email.isBlank()) {
@@ -64,7 +63,6 @@ public class AuthController {
         return ResponseEntity.ok(Map.of("exists", exists));
     }
 
-    // Real-time username availability check during registration and OAuth setup
     @GetMapping("/check-username")
     public ResponseEntity<Map<String, Boolean>> checkUsername(@RequestParam String username) {
         if (username == null || username.isBlank()) {
@@ -74,7 +72,6 @@ public class AuthController {
         return ResponseEntity.ok(Map.of("exists", exists));
     }
 
-    // Send 6-digit OTP for new account registration
     @PostMapping("/send-otp")
     public ResponseEntity<?> sendOtp(@RequestBody SendOtpRequest request) {
         if (request.email() == null || request.email().isBlank()) {
@@ -91,13 +88,12 @@ public class AuthController {
             otpService.sendOtp(cleanEmail);
             return ResponseEntity.ok(Map.of("message", "OTP sent successfully to " + cleanEmail));
         } catch (Exception ex) {
-            log.error("Failed to send OTP to {}: {}", cleanEmail, ex.getMessage());
+            log.error("Failed to send registration OTP to {}: {}", cleanEmail, ex.getMessage());
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
                     .body(Map.of("error", "Failed to send verification email. Please check mail credentials."));
         }
     }
 
-    // Verify OTP code before allowing username and password selection
     @PostMapping("/verify-otp")
     public ResponseEntity<?> verifyOtpOnly(@RequestBody Map<String, String> payload) {
         String email = payload.get("email");
@@ -116,7 +112,6 @@ public class AuthController {
         return ResponseEntity.ok(Map.of("message", "OTP verified successfully."));
     }
 
-    // Direct registration endpoint
     @PostMapping("/register")
     public ResponseEntity<?> registerDirect(@RequestBody RegisterWithOtpRequest request) {
         if (request.email() == null || request.email().isBlank()) {
@@ -158,7 +153,6 @@ public class AuthController {
         return ResponseEntity.ok(new AuthResponse(token, user.getUsername(), false, false));
     }
 
-    // Complete registration with verified OTP, unique username, and password
     @PostMapping("/register-with-otp")
     public ResponseEntity<?> registerWithOtp(@RequestBody RegisterWithOtpRequest request) {
         if (request.email() == null || request.email().isBlank()) {
@@ -207,60 +201,69 @@ public class AuthController {
         return ResponseEntity.ok(new AuthResponse(token, user.getUsername(), false, false));
     }
 
-    // Send OTP for password recovery
+    // Send 6-digit password recovery OTP to registered email (supports email or username lookup)
     @PostMapping("/forgot-password/send-otp")
-    public ResponseEntity<?> sendForgotPasswordOtp(@RequestBody SendOtpRequest request) {
-        if (request.email() == null || request.email().isBlank()) {
-            return ResponseEntity.badRequest().body(Map.of("error", "Email is required."));
+    public ResponseEntity<?> sendForgotPasswordOtp(@RequestBody Map<String, String> payload) {
+        String identifier = payload.get("email");
+        if (identifier == null || identifier.isBlank()) {
+            return ResponseEntity.badRequest().body(Map.of("error", "Please enter your registered email address."));
         }
 
-        String cleanEmail = request.email().trim().toLowerCase();
-        if (!userRepository.existsByEmail(cleanEmail)) {
+        String cleanInput = identifier.trim();
+        User user = userRepository.findByUsernameOrEmail(cleanInput, cleanInput.toLowerCase()).orElse(null);
+
+        if (user == null || user.getEmail() == null || user.getEmail().isBlank()) {
             return ResponseEntity.status(HttpStatus.NOT_FOUND)
-                    .body(Map.of("error", "No registered account found with this email address."));
+                    .body(Map.of("error", "No registered account found with that email address."));
         }
 
+        String targetEmail = user.getEmail().trim().toLowerCase();
         try {
-            otpService.sendOtp(cleanEmail);
-            return ResponseEntity.ok(Map.of("message", "Password reset code sent to " + cleanEmail));
+            otpService.sendPasswordResetOtp(targetEmail);
+            return ResponseEntity.ok(Map.of(
+                    "message", "Password reset OTP sent to " + targetEmail,
+                    "email", targetEmail
+            ));
         } catch (Exception ex) {
-            log.error("Failed to send password reset OTP to {}: {}", cleanEmail, ex.getMessage());
+            log.error("Failed to send password reset OTP to {}: {}", targetEmail, ex.getMessage());
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
-                    .body(Map.of("error", "Failed to send password reset email."));
+                    .body(Map.of("error", "Failed to send password reset email. Please try again."));
         }
     }
 
-    // Reset account password using OTP verification
+    // Verify OTP and update user password in database
     @PostMapping("/reset-password")
     @Transactional
     public ResponseEntity<?> resetPassword(@RequestBody Map<String, String> payload) {
-        String email = payload.get("email");
+        String identifier = payload.get("email");
         String otp = payload.get("otp");
         String newPassword = payload.get("newPassword");
 
-        if (email == null || email.isBlank() || otp == null || otp.isBlank() || newPassword == null || newPassword.length() < 6) {
-            return ResponseEntity.badRequest()
-                    .body(Map.of("error", "Valid email, 6-digit OTP, and a new password (min 6 characters) are required."));
+        if (identifier == null || identifier.isBlank() || otp == null || otp.isBlank()) {
+            return ResponseEntity.badRequest().body(Map.of("error", "Email and 6-digit OTP code are required."));
+        }
+        if (newPassword == null || newPassword.trim().length() < 6) {
+            return ResponseEntity.badRequest().body(Map.of("error", "New password must be at least 6 characters long."));
         }
 
-        String cleanEmail = email.trim().toLowerCase();
-        if (!otpService.verifyOtp(cleanEmail, otp.trim())) {
+        String cleanInput = identifier.trim();
+        User user = userRepository.findByUsernameOrEmail(cleanInput, cleanInput.toLowerCase())
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "No account found for this email."));
+
+        String targetEmail = user.getEmail().trim().toLowerCase();
+        if (!otpService.verifyOtp(targetEmail, otp.trim())) {
             return ResponseEntity.status(HttpStatus.BAD_REQUEST)
-                    .body(Map.of("error", "Invalid or expired OTP code."));
+                    .body(Map.of("error", "Invalid or expired OTP code. Please check and try again."));
         }
-
-        User user = userRepository.findByEmail(cleanEmail)
-                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "User not found."));
 
         user.setPassword(passwordEncoder.encode(newPassword.trim()));
         user.setPasswordSet(true);
         userRepository.save(user);
-        otpService.clearOtp(cleanEmail);
+        otpService.clearOtp(targetEmail);
 
-        return ResponseEntity.ok(Map.of("message", "Password updated successfully. You can now sign in."));
+        return ResponseEntity.ok(Map.of("message", "Password updated successfully. Please sign in with your new password."));
     }
 
-    // Authenticate existing user via username or email
     @PostMapping("/login")
     public ResponseEntity<?> login(@RequestBody AuthRequest request) {
         String identifier = request.effectiveUsername();
@@ -293,7 +296,6 @@ public class AuthController {
         return ResponseEntity.ok(new AuthResponse(token, user.getUsername(), !user.isPasswordSet(), user.isGuest()));
     }
 
-    // Provision a temporary guest user bound to client device ID
     @PostMapping("/guest")
     public ResponseEntity<AuthResponse> guestLogin(HttpServletRequest request) {
         String deviceId = request.getHeader("X-Device-Id");
@@ -322,7 +324,6 @@ public class AuthController {
         return ResponseEntity.ok(new AuthResponse(token, guestUser.getUsername(), false, true));
     }
 
-    // Finalize username and password setup for OAuth2 users
     @PostMapping("/set-credentials")
     @Transactional
     public ResponseEntity<AuthResponse> setCredentials(@AuthenticationPrincipal UserDetails userDetails,

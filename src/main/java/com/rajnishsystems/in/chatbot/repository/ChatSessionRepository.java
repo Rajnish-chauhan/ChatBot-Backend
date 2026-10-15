@@ -10,4 +10,7 @@ import java.util.List;
 public interface ChatSessionRepository extends JpaRepository<ChatSession, Long> {
     @EntityGraph(attributePaths = "messages")
     List<ChatSession> findByUserOrderByIdAsc(User user);
+
+    @EntityGraph(attributePaths = "messages")
+    List<ChatSession> findByUserOrderByIdDesc(User user);
 }

@@ -47,7 +47,7 @@ public class ChatController {
     @GetMapping("/sessions")
     public ResponseEntity<List<ChatSession>> getSessions(@AuthenticationPrincipal UserDetails userDetails) {
         User user = getUser(userDetails);
-        return ResponseEntity.ok(sessionRepository.findByUserOrderByIdAsc(user));
+        return ResponseEntity.ok(sessionRepository.findByUserOrderByIdDesc(user));
     }
 
     @PostMapping("/sessions")
@@ -61,6 +61,7 @@ public class ChatController {
         ChatSession session = new ChatSession();
         session.setTitle(title);
         session.setUser(user);
+        session.setUsername(user.getUsername());
         return ResponseEntity.ok(sessionRepository.save(session));
     }
 
@@ -84,6 +85,7 @@ public class ChatController {
         String newTitle = body.get("title");
         if (newTitle != null && !newTitle.isBlank()) {
             session.setTitle(newTitle.trim());
+            session.setUsername(user.getUsername());
             sessionRepository.save(session);
         }
         return ResponseEntity.ok(session);
@@ -102,7 +104,6 @@ public class ChatController {
         return ResponseEntity.noContent().build();
     }
 
-    // Multipart streaming endpoint for single or multiple file uploads (up to 3 files, max 20 MB total)
     @PostMapping(value = "/{sessionId}/stream", consumes = MediaType.MULTIPART_FORM_DATA_VALUE, produces = MediaType.TEXT_EVENT_STREAM_VALUE)
     public Flux<String> streamMessageWithFile(@AuthenticationPrincipal UserDetails userDetails,
                                               @PathVariable Long sessionId,
@@ -120,7 +121,6 @@ public class ChatController {
         }
     }
 
-    // JSON streaming endpoint for text-only prompts
     @PostMapping(value = "/{sessionId}/stream", consumes = MediaType.APPLICATION_JSON_VALUE, produces = MediaType.TEXT_EVENT_STREAM_VALUE)
     public Flux<String> streamMessageJsonOnly(@AuthenticationPrincipal UserDetails userDetails,
                                               @PathVariable Long sessionId,
