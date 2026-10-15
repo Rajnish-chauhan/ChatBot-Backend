@@ -79,8 +79,11 @@ public class SecurityConfig {
                         .successHandler(oAuth2LoginSuccessHandler)
                         .failureHandler((request, response, exception) -> {
                             String errorMsg = exception.getMessage() != null ? exception.getMessage() : "Google login failed";
-                            String normalizedBase = frontendBaseUrl.replaceAll("/+$", "");
-                            response.sendRedirect(normalizedBase + "/?error=" + URLEncoder.encode(errorMsg, StandardCharsets.UTF_8));
+                            String host = request.getServerName() != null ? request.getServerName().toLowerCase() : "";
+                            String targetBase = (host.contains("localhost") || host.contains("127.0.0.1"))
+                                    ? "http://localhost:5173"
+                                    : "https://chatbot.rajnishsystems.in";
+                            response.sendRedirect(targetBase + "/?error=" + URLEncoder.encode(errorMsg, StandardCharsets.UTF_8));
                         })
                 );
 
@@ -104,12 +107,15 @@ public class SecurityConfig {
     public CorsConfigurationSource corsConfigurationSource() {
         CorsConfiguration config = new CorsConfiguration();
 
-        // Allow local development ports, Vercel preview deployments, and production domains
+        // Allow local ports, Vercel preview domains, and all rajnishsystems.in domains
         List<String> originPatterns = new ArrayList<>(List.of(
                 "http://localhost:[*]",
+                "http://localhost:*",
                 "http://127.0.0.1:[*]",
+                "http://127.0.0.1:*",
                 "https://*.vercel.app",
                 "https://chatbot.rajnishsystems.in",
+                "https://*.rajnishsystems.in",
                 "https://rajnishsystems.in"
         ));
 
@@ -119,7 +125,7 @@ public class SecurityConfig {
 
         config.setAllowedOriginPatterns(originPatterns);
         config.setAllowedMethods(List.of("GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"));
-        config.setAllowedHeaders(List.of("Authorization", "Content-Type", "Accept", "X-Device-Id", "*"));
+        config.setAllowedHeaders(List.of("Authorization", "Content-Type", "Accept", "X-Device-Id", "Origin", "X-Requested-With", "*"));
         config.setExposedHeaders(List.of("X-Rate-Limit-Remaining", "X-Rate-Limit-Retry-After-Seconds"));
         config.setAllowCredentials(true);
 

@@ -28,16 +28,35 @@ public class OAuth2LoginSuccessHandler extends SimpleUrlAuthenticationSuccessHan
     private final UserRepository userRepository;
 
     @Value("${app.frontend.url:http://localhost:5173}")
-    private String frontendBaseUrl;
+    private String configuredFrontendUrl;
 
     public OAuth2LoginSuccessHandler(JwtUtils jwtUtils, UserRepository userRepository) {
         this.jwtUtils = jwtUtils;
         this.userRepository = userRepository;
     }
 
+    // Automatically select localhost:5173 for local runs and chatbot.rajnishsystems.in for live runs
+    private String resolveTargetFrontendUrl(HttpServletRequest request) {
+        String serverName = request.getServerName() != null ? request.getServerName().toLowerCase() : "";
+        String forwardedHost = request.getHeader("X-Forwarded-Host");
+        String host = (forwardedHost != null && !forwardedHost.isBlank()) ? forwardedHost.toLowerCase() : serverName;
+
+        if (host.contains("localhost") || host.contains("127.0.0.1")) {
+            return "http://localhost:5173";
+        }
+        if (host.contains("rajnishsystems.in")) {
+            return "https://chatbot.rajnishsystems.in";
+        }
+        String cleaned = configuredFrontendUrl != null ? configuredFrontendUrl.replaceAll("/+$", "") : "https://chatbot.rajnishsystems.in";
+        if (cleaned.contains("localhost")) {
+            return "https://chatbot.rajnishsystems.in";
+        }
+        return cleaned;
+    }
+
     @Override
     public void onAuthenticationSuccess(HttpServletRequest request, HttpServletResponse response, Authentication authentication) throws IOException, ServletException {
-        String normalizedBaseUrl = frontendBaseUrl.replaceAll("/+$", "");
+        String targetBaseUrl = resolveTargetFrontendUrl(request);
 
         try {
             OAuth2User oAuth2User = (OAuth2User) authentication.getPrincipal();
@@ -49,7 +68,6 @@ public class OAuth2LoginSuccessHandler extends SimpleUrlAuthenticationSuccessHan
             }
             final String cleanEmail = email.trim().toLowerCase();
 
-            // Provision a new OAuth user if no account exists for this email
             User user = userRepository.findByEmail(cleanEmail).orElseGet(() -> {
                 User newUser = new User();
                 newUser.setEmail(cleanEmail);
@@ -76,20 +94,19 @@ public class OAuth2LoginSuccessHandler extends SimpleUrlAuthenticationSuccessHan
 
             String token = jwtUtils.generateToken(userDetails);
 
-            // Redirect to frontend with JWT and prompt for credential setup if password is not yet configured
             String frontendUrl = String.format("%s/?token=%s&username=%s%s",
-                    normalizedBaseUrl,
+                    targetBaseUrl,
                     token,
                     URLEncoder.encode(user.getUsername(), StandardCharsets.UTF_8),
                     (!user.isPasswordSet() ? "&new_oauth=true" : ""));
 
-            log.info("OAuth2 authentication succeeded for user: {}", user.getUsername());
+            log.info("OAuth2 login succeeded for user: {}. Redirecting to {}", user.getUsername(), targetBaseUrl);
             getRedirectStrategy().sendRedirect(request, response, frontendUrl);
 
         } catch (Exception ex) {
-            log.error("OAuth2 authentication failed", ex);
+            log.error("OAuth2 authentication error: ", ex);
             String errorMsg = ex.getMessage() != null ? ex.getMessage() : "OAuth2 authentication error";
-            getRedirectStrategy().sendRedirect(request, response, normalizedBaseUrl + "/?error=" + URLEncoder.encode(errorMsg, StandardCharsets.UTF_8));
+            getRedirectStrategy().sendRedirect(request, response, targetBaseUrl + "/?error=" + URLEncoder.encode(errorMsg, StandardCharsets.UTF_8));
         }
     }
 }
