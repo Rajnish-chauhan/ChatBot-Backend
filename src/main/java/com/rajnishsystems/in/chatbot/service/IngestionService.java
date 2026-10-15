@@ -5,6 +5,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.ai.document.Document;
 import org.springframework.ai.reader.tika.TikaDocumentReader;
 import org.springframework.ai.transformer.splitter.TokenTextSplitter;
+import org.springframework.ai.vectorstore.SearchRequest;
 import org.springframework.ai.vectorstore.VectorStore;
 import org.springframework.boot.context.event.ApplicationReadyEvent;
 import org.springframework.context.event.EventListener;
@@ -25,36 +26,45 @@ public class IngestionService {
         this.vectorStore = vectorStore;
     }
 
-    // Server start hote hi PDF Tika ke through automatically vector db me load ho jayegi
+    // Automatically ingest the privacy policy PDF on startup if the vector store does not already contain it
     @EventListener(ApplicationReadyEvent.class)
     public void loadPrivacyPdfOnStartup() {
         try {
             Resource pdfResource = new ClassPathResource("Chatbot_Privacy_Policy.pdf");
-            if (pdfResource.exists()) {
+            if (!pdfResource.exists()) {
+                log.warn("Chatbot_Privacy_Policy.pdf not found in classpath resources.");
+                return;
+            }
+
+            List<Document> existing = vectorStore.similaritySearch(
+                    SearchRequest.builder()
+                            .query("ChatBot Privacy Policy Rajnish Systems")
+                            .topK(1)
+                            .similarityThreshold(0.50)
+                            .build()
+            );
+
+            if (existing == null || existing.isEmpty()) {
                 ingestDocument(pdfResource);
-                log.info("RAG Success: Chatbot_Privacy_Policy.pdf loaded via Tika into Vector DB.");
+                log.info("Chatbot_Privacy_Policy.pdf ingested into vector store via Apache Tika.");
             } else {
-                log.warn("Chatbot_Privacy_Policy.pdf resources folder me nahi mili.");
+                log.info("Policy chunks already present in vector store; skipping duplicate startup ingestion.");
             }
         } catch (Exception e) {
-            log.error("Failed to load PDF via Tika: ", e);
+            log.error("Failed to ingest policy PDF on startup: ", e);
         }
     }
 
     public void ingestDocument(Resource documentResource) {
-        // 1. Read PDF document using Apache Tika
         TikaDocumentReader reader = new TikaDocumentReader(documentResource);
         List<Document> rawDocuments = reader.get();
 
-        // 2. Chunking: split into chunks
         TokenTextSplitter splitter = TokenTextSplitter.builder()
                 .withChunkSize(600)
                 .withMinChunkSizeChars(200)
                 .build();
 
         List<Document> chunks = splitter.apply(rawDocuments);
-
-        // 3. Generate embeddings & store in PostgreSQL Vector DB
         vectorStore.add(chunks);
     }
 }

@@ -17,7 +17,7 @@ public class PolicyController {
         this.ingestionService = ingestionService;
     }
 
-    // Agar kabhi manually dobara PDF load karni ho to is endpoint ko call kar sakte ho
+    // Manually trigger ingestion of the privacy policy PDF into the vector store
     @GetMapping("/api/rag/load-pdf")
     public ResponseEntity<String> forceLoadPdf() {
         try {

@@ -55,9 +55,7 @@ public class RateLimitFilter extends OncePerRequestFilter {
         User user = userRepository.findByUsername(username).orElse(null);
         boolean isGuest = (user != null) && user.isGuest();
 
-        // Anti-Abuse Tracking Key:
-        // Registered users are bound to their unique registered username.
-        // Guests are strictly bound to their Client IP & Browser Device ID so clearing localStorage or re-guesting cannot bypass limits.
+        // Bind guests to IP + device identifier to prevent quota bypass via localStorage clearing
         String rateLimitKey;
         if (isGuest) {
             String clientIp = extractClientIp(request);
@@ -67,7 +65,7 @@ public class RateLimitFilter extends OncePerRequestFilter {
             rateLimitKey = "user_limit:" + username;
         }
 
-        long capacity = isGuest ? 10 : 20;
+        long capacity = isGuest ? 10 : 50;
         Bucket bucket = userBuckets.computeIfAbsent(rateLimitKey, k -> createNewBucket(capacity));
 
         ConsumptionProbe probe = bucket.tryConsumeAndReturnRemaining(1);
@@ -88,7 +86,7 @@ public class RateLimitFilter extends OncePerRequestFilter {
         }
     }
 
-    // Resolves real client IP even behind Cloudflare and reverse proxies
+    // Extract client IP behind Cloudflare or standard reverse proxies
     private String extractClientIp(HttpServletRequest request) {
         String ip = request.getHeader("CF-Connecting-IP");
         if (ip == null || ip.isBlank() || "unknown".equalsIgnoreCase(ip)) {
@@ -107,7 +105,6 @@ public class RateLimitFilter extends OncePerRequestFilter {
     }
 
     private Bucket createNewBucket(long capacity) {
-        // Resets intervally every 24 hours
         Bandwidth limit = Bandwidth.classic(capacity, Refill.intervally(capacity, Duration.ofDays(1)));
         return Bucket.builder().addLimit(limit).build();
     }

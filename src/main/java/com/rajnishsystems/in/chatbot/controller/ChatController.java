@@ -8,6 +8,8 @@ import com.rajnishsystems.in.chatbot.repository.ChatMessageRepository;
 import com.rajnishsystems.in.chatbot.repository.ChatSessionRepository;
 import com.rajnishsystems.in.chatbot.repository.UserRepository;
 import com.rajnishsystems.in.chatbot.service.ChatService;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
@@ -21,13 +23,11 @@ import reactor.core.publisher.Flux;
 import java.util.List;
 import java.util.Map;
 
-/**
- * Controller handling session creation, history retrieval, session renaming,
- * and text/multipart streaming endpoints.
- */
 @RestController
 @RequestMapping("/api/chat")
 public class ChatController {
+
+    private static final Logger log = LoggerFactory.getLogger(ChatController.class);
 
     private final ChatService chatService;
     private final ChatSessionRepository sessionRepository;
@@ -102,28 +102,38 @@ public class ChatController {
         return ResponseEntity.noContent().build();
     }
 
-    // MULTIPART streaming: Handles attached files (Images, PDFs, Docs) alongside prompt text
+    // Multipart streaming endpoint for single or multiple file uploads (up to 3 files, max 20 MB total)
     @PostMapping(value = "/{sessionId}/stream", consumes = MediaType.MULTIPART_FORM_DATA_VALUE, produces = MediaType.TEXT_EVENT_STREAM_VALUE)
     public Flux<String> streamMessageWithFile(@AuthenticationPrincipal UserDetails userDetails,
                                               @PathVariable Long sessionId,
                                               @RequestParam(value = "text", required = false) String text,
                                               @RequestParam(value = "message", required = false) String messageFallback,
-                                              @RequestPart(value = "files", required = false) List<MultipartFile> files) {
-        User user = getUser(userDetails);
-        validateSessionOwnership(user, sessionId);
-        String finalText = (text != null && !text.isBlank()) ? text : (messageFallback != null ? messageFallback : "");
-        return chatService.processAndStreamMessage(sessionId, finalText, files, user.getUsername());
+                                              @RequestParam(value = "files", required = false) List<MultipartFile> files) {
+        try {
+            User user = getUser(userDetails);
+            validateSessionOwnership(user, sessionId);
+            String finalText = (text != null && !text.isBlank()) ? text : (messageFallback != null ? messageFallback : "");
+            return chatService.processAndStreamMessage(sessionId, finalText, files, user.getUsername());
+        } catch (Throwable ex) {
+            log.error("Multipart stream error for session {}: ", sessionId, ex);
+            return Flux.just("Unable to process the uploaded files: " + (ex.getMessage() != null ? ex.getMessage() : "Unexpected error."));
+        }
     }
 
-    // JSON streaming: Handles text-only queries
+    // JSON streaming endpoint for text-only prompts
     @PostMapping(value = "/{sessionId}/stream", consumes = MediaType.APPLICATION_JSON_VALUE, produces = MediaType.TEXT_EVENT_STREAM_VALUE)
     public Flux<String> streamMessageJsonOnly(@AuthenticationPrincipal UserDetails userDetails,
                                               @PathVariable Long sessionId,
                                               @RequestBody ChatRequest request) {
-        User user = getUser(userDetails);
-        validateSessionOwnership(user, sessionId);
-        String text = (request != null) ? request.effectiveText() : "";
-        return chatService.processAndStreamMessage(sessionId, text, null, user.getUsername());
+        try {
+            User user = getUser(userDetails);
+            validateSessionOwnership(user, sessionId);
+            String text = (request != null) ? request.effectiveText() : "";
+            return chatService.processAndStreamMessage(sessionId, text, null, user.getUsername());
+        } catch (Throwable ex) {
+            log.error("JSON stream error for session {}: ", sessionId, ex);
+            return Flux.just("Unable to process your request: " + (ex.getMessage() != null ? ex.getMessage() : "Unexpected error."));
+        }
     }
 
     private void validateSessionOwnership(User user, Long sessionId) {

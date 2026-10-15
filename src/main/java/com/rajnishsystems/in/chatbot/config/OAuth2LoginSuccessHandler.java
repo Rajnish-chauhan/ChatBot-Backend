@@ -37,6 +37,8 @@ public class OAuth2LoginSuccessHandler extends SimpleUrlAuthenticationSuccessHan
 
     @Override
     public void onAuthenticationSuccess(HttpServletRequest request, HttpServletResponse response, Authentication authentication) throws IOException, ServletException {
+        String normalizedBaseUrl = frontendBaseUrl.replaceAll("/+$", "");
+
         try {
             OAuth2User oAuth2User = (OAuth2User) authentication.getPrincipal();
 
@@ -47,6 +49,7 @@ public class OAuth2LoginSuccessHandler extends SimpleUrlAuthenticationSuccessHan
             }
             final String cleanEmail = email.trim().toLowerCase();
 
+            // Provision a new OAuth user if no account exists for this email
             User user = userRepository.findByEmail(cleanEmail).orElseGet(() -> {
                 User newUser = new User();
                 newUser.setEmail(cleanEmail);
@@ -73,20 +76,20 @@ public class OAuth2LoginSuccessHandler extends SimpleUrlAuthenticationSuccessHan
 
             String token = jwtUtils.generateToken(userDetails);
 
-            // Redirect directly to frontend with authentication token, username, and new_oauth flag if password is not set
+            // Redirect to frontend with JWT and prompt for credential setup if password is not yet configured
             String frontendUrl = String.format("%s/?token=%s&username=%s%s",
-                    frontendBaseUrl,
+                    normalizedBaseUrl,
                     token,
                     URLEncoder.encode(user.getUsername(), StandardCharsets.UTF_8),
                     (!user.isPasswordSet() ? "&new_oauth=true" : ""));
 
-            log.info("OAuth2 login successful for user: {}. Redirecting to frontend.", user.getUsername());
+            log.info("OAuth2 authentication succeeded for user: {}", user.getUsername());
             getRedirectStrategy().sendRedirect(request, response, frontendUrl);
 
         } catch (Exception ex) {
-            log.error("Error processing OAuth2 login success: ", ex);
+            log.error("OAuth2 authentication failed", ex);
             String errorMsg = ex.getMessage() != null ? ex.getMessage() : "OAuth2 authentication error";
-            getRedirectStrategy().sendRedirect(request, response, frontendBaseUrl + "/?error=" + URLEncoder.encode(errorMsg, StandardCharsets.UTF_8));
+            getRedirectStrategy().sendRedirect(request, response, normalizedBaseUrl + "/?error=" + URLEncoder.encode(errorMsg, StandardCharsets.UTF_8));
         }
     }
 }

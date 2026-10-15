@@ -26,9 +26,6 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 
-/**
- * Spring Security configuration enabling JWT filter, OAuth2 flow, and permissive CORS patterns.
- */
 @Configuration
 @EnableWebSecurity
 public class SecurityConfig {
@@ -36,7 +33,7 @@ public class SecurityConfig {
     private final JwtAuthenticationFilter jwtAuthenticationFilter;
     private final OAuth2LoginSuccessHandler oAuth2LoginSuccessHandler;
     private final JwtAuthenticationEntryPoint authenticationEntryPoint;
-    private final UserRepository userRepository;
+    private final RateLimitFilter rateLimitFilter;
 
     @Value("${app.frontend.url:http://localhost:5173}")
     private String frontendBaseUrl;
@@ -47,11 +44,12 @@ public class SecurityConfig {
     public SecurityConfig(JwtAuthenticationFilter jwtAuthenticationFilter,
                           OAuth2LoginSuccessHandler oAuth2LoginSuccessHandler,
                           JwtAuthenticationEntryPoint authenticationEntryPoint,
+                          RateLimitFilter rateLimitFilter,
                           UserRepository userRepository) {
         this.jwtAuthenticationFilter = jwtAuthenticationFilter;
         this.oAuth2LoginSuccessHandler = oAuth2LoginSuccessHandler;
         this.authenticationEntryPoint = authenticationEntryPoint;
-        this.userRepository = userRepository;
+        this.rateLimitFilter = rateLimitFilter != null ? rateLimitFilter : new RateLimitFilter(userRepository);
     }
 
     @Bean
@@ -81,12 +79,13 @@ public class SecurityConfig {
                         .successHandler(oAuth2LoginSuccessHandler)
                         .failureHandler((request, response, exception) -> {
                             String errorMsg = exception.getMessage() != null ? exception.getMessage() : "Google login failed";
-                            response.sendRedirect(frontendBaseUrl + "/?error=" + URLEncoder.encode(errorMsg, StandardCharsets.UTF_8));
+                            String normalizedBase = frontendBaseUrl.replaceAll("/+$", "");
+                            response.sendRedirect(normalizedBase + "/?error=" + URLEncoder.encode(errorMsg, StandardCharsets.UTF_8));
                         })
                 );
 
         http.addFilterBefore(jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter.class);
-        http.addFilterAfter(new RateLimitFilter(userRepository), JwtAuthenticationFilter.class);
+        http.addFilterAfter(rateLimitFilter, JwtAuthenticationFilter.class);
 
         return http.build();
     }
@@ -105,12 +104,13 @@ public class SecurityConfig {
     public CorsConfigurationSource corsConfigurationSource() {
         CorsConfiguration config = new CorsConfiguration();
 
-        // Allowed origin patterns supporting localhost ports, Vercel deployments, and production domains
+        // Allow local development ports, Vercel preview deployments, and production domains
         List<String> originPatterns = new ArrayList<>(List.of(
                 "http://localhost:[*]",
                 "http://127.0.0.1:[*]",
                 "https://*.vercel.app",
-                "https://chatbot.rajnishsystems.in"
+                "https://chatbot.rajnishsystems.in",
+                "https://rajnishsystems.in"
         ));
 
         if (rawAllowedOrigins != null && !rawAllowedOrigins.isBlank()) {

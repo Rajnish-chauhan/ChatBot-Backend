@@ -1,5 +1,5 @@
 services:
-  # 1. Local PostgreSQL with PGVector extension
+  # Local PostgreSQL instance with PGVector extension
   postgres:
     image: ankane/pgvector:latest
     container_name: chatbot_db
@@ -7,7 +7,6 @@ services:
       POSTGRES_USER: root
       POSTGRES_PASSWORD: root
       POSTGRES_DB: vector-db
-    # Port 5432 is kept exposed on local machine for IDE / Spring Boot local access
     ports:
       - "5432:5432"
     volumes:
@@ -19,12 +18,11 @@ services:
       timeout: 5s
       retries: 5
 
-  # 2. Local Spring Boot Backend Service (Optional if running via IDE)
+  # Spring Boot backend container
   backend:
     image: rajnish425/chatbot-backend:latest
     container_name: chatbot_app
     ports:
-      # Port 8080 for local React frontend (http://localhost:8080)
       - "8080:8080"
     environment:
       - SPRING_DATASOURCE_URL=jdbc:postgresql://postgres:5432/vector-db
@@ -36,8 +34,8 @@ services:
       - GMAIL_APP_PASSWORD=${GMAIL_APP_PASSWORD}
       - GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID}
       - GOOGLE_CLIENT_SECRET=${GOOGLE_CLIENT_SECRET}
-      - FRONTEND_URL=http://localhost:5173
-      - CORS_ALLOWED_ORIGINS=http://localhost:5173
+      - FRONTEND_URL=${FRONTEND_URL:-http://localhost:5173}
+      - CORS_ALLOWED_ORIGINS=${CORS_ALLOWED_ORIGINS:-http://localhost:5173,[https://chatbot.rajnishsystems.in](https://chatbot.rajnishsystems.in)}
       - JAVA_TOOL_OPTIONS=-Xmx800m -Xms300m
     depends_on:
       postgres:

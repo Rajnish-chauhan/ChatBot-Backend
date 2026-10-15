@@ -24,10 +24,6 @@ import java.util.ArrayList;
 import java.util.Map;
 import java.util.UUID;
 
-/**
- * Authentication controller handling User Login, Registration (Direct & OTP-based),
- * Guest sessions, and Password recovery.
- */
 @RestController
 @RequestMapping("/api/auth")
 public class AuthController {
@@ -58,6 +54,7 @@ public class AuthController {
         this.otpService = otpService;
     }
 
+    // Real-time email availability check during registration
     @GetMapping("/check-email")
     public ResponseEntity<Map<String, Boolean>> checkEmail(@RequestParam String email) {
         if (email == null || email.isBlank()) {
@@ -67,6 +64,7 @@ public class AuthController {
         return ResponseEntity.ok(Map.of("exists", exists));
     }
 
+    // Real-time username availability check during registration and OAuth setup
     @GetMapping("/check-username")
     public ResponseEntity<Map<String, Boolean>> checkUsername(@RequestParam String username) {
         if (username == null || username.isBlank()) {
@@ -76,6 +74,7 @@ public class AuthController {
         return ResponseEntity.ok(Map.of("exists", exists));
     }
 
+    // Send 6-digit OTP for new account registration
     @PostMapping("/send-otp")
     public ResponseEntity<?> sendOtp(@RequestBody SendOtpRequest request) {
         if (request.email() == null || request.email().isBlank()) {
@@ -98,6 +97,7 @@ public class AuthController {
         }
     }
 
+    // Verify OTP code before allowing username and password selection
     @PostMapping("/verify-otp")
     public ResponseEntity<?> verifyOtpOnly(@RequestBody Map<String, String> payload) {
         String email = payload.get("email");
@@ -116,7 +116,7 @@ public class AuthController {
         return ResponseEntity.ok(Map.of("message", "OTP verified successfully."));
     }
 
-    // Direct account registration endpoint
+    // Direct registration endpoint
     @PostMapping("/register")
     public ResponseEntity<?> registerDirect(@RequestBody RegisterWithOtpRequest request) {
         if (request.email() == null || request.email().isBlank()) {
@@ -158,7 +158,7 @@ public class AuthController {
         return ResponseEntity.ok(new AuthResponse(token, user.getUsername(), false, false));
     }
 
-    // Registration with mandatory OTP verification
+    // Complete registration with verified OTP, unique username, and password
     @PostMapping("/register-with-otp")
     public ResponseEntity<?> registerWithOtp(@RequestBody RegisterWithOtpRequest request) {
         if (request.email() == null || request.email().isBlank()) {
@@ -207,6 +207,60 @@ public class AuthController {
         return ResponseEntity.ok(new AuthResponse(token, user.getUsername(), false, false));
     }
 
+    // Send OTP for password recovery
+    @PostMapping("/forgot-password/send-otp")
+    public ResponseEntity<?> sendForgotPasswordOtp(@RequestBody SendOtpRequest request) {
+        if (request.email() == null || request.email().isBlank()) {
+            return ResponseEntity.badRequest().body(Map.of("error", "Email is required."));
+        }
+
+        String cleanEmail = request.email().trim().toLowerCase();
+        if (!userRepository.existsByEmail(cleanEmail)) {
+            return ResponseEntity.status(HttpStatus.NOT_FOUND)
+                    .body(Map.of("error", "No registered account found with this email address."));
+        }
+
+        try {
+            otpService.sendOtp(cleanEmail);
+            return ResponseEntity.ok(Map.of("message", "Password reset code sent to " + cleanEmail));
+        } catch (Exception ex) {
+            log.error("Failed to send password reset OTP to {}: {}", cleanEmail, ex.getMessage());
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                    .body(Map.of("error", "Failed to send password reset email."));
+        }
+    }
+
+    // Reset account password using OTP verification
+    @PostMapping("/reset-password")
+    @Transactional
+    public ResponseEntity<?> resetPassword(@RequestBody Map<String, String> payload) {
+        String email = payload.get("email");
+        String otp = payload.get("otp");
+        String newPassword = payload.get("newPassword");
+
+        if (email == null || email.isBlank() || otp == null || otp.isBlank() || newPassword == null || newPassword.length() < 6) {
+            return ResponseEntity.badRequest()
+                    .body(Map.of("error", "Valid email, 6-digit OTP, and a new password (min 6 characters) are required."));
+        }
+
+        String cleanEmail = email.trim().toLowerCase();
+        if (!otpService.verifyOtp(cleanEmail, otp.trim())) {
+            return ResponseEntity.status(HttpStatus.BAD_REQUEST)
+                    .body(Map.of("error", "Invalid or expired OTP code."));
+        }
+
+        User user = userRepository.findByEmail(cleanEmail)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "User not found."));
+
+        user.setPassword(passwordEncoder.encode(newPassword.trim()));
+        user.setPasswordSet(true);
+        userRepository.save(user);
+        otpService.clearOtp(cleanEmail);
+
+        return ResponseEntity.ok(Map.of("message", "Password updated successfully. You can now sign in."));
+    }
+
+    // Authenticate existing user via username or email
     @PostMapping("/login")
     public ResponseEntity<?> login(@RequestBody AuthRequest request) {
         String identifier = request.effectiveUsername();
@@ -239,7 +293,7 @@ public class AuthController {
         return ResponseEntity.ok(new AuthResponse(token, user.getUsername(), !user.isPasswordSet(), user.isGuest()));
     }
 
-    // Generates temporary guest session with valid JWT token
+    // Provision a temporary guest user bound to client device ID
     @PostMapping("/guest")
     public ResponseEntity<AuthResponse> guestLogin(HttpServletRequest request) {
         String deviceId = request.getHeader("X-Device-Id");
@@ -268,7 +322,9 @@ public class AuthController {
         return ResponseEntity.ok(new AuthResponse(token, guestUser.getUsername(), false, true));
     }
 
+    // Finalize username and password setup for OAuth2 users
     @PostMapping("/set-credentials")
+    @Transactional
     public ResponseEntity<AuthResponse> setCredentials(@AuthenticationPrincipal UserDetails userDetails,
                                                        @RequestBody SetCredentialsRequest request) {
         if (userDetails == null) {
