@@ -4,6 +4,7 @@ import com.fasterxml.jackson.annotation.JsonAlias;
 
 /**
  * Authentication credentials supporting both 'username' and 'emailOrUsername' JSON properties.
+ * Done
  */
 public record AuthRequest(
         @JsonAlias("emailOrUsername")
