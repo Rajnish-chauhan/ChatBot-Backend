@@ -218,5 +218,5 @@ docker compose up --build -d
 *Java Backend & AI Integration Engineer*
 
 -  **Portfolio:** [rajnishsystems.in](https://rajnishsystems.in)
--  **LinkedIn:** [linkedin.com/in/rajnishchauhandeveloper](https://www.linkedin.com)
--  **GitHub:** [github.com/Rajnish-chauhan](https://github.com/rajnish425)
+-  **LinkedIn:** [linkedin.com/in/rajnishchauhandeveloper](https://www.linkedin.com/in/rajnishchauhandeveloper)
+-  **GitHub:** [github.com/Rajnish-chauhan](https://github.com/Rajnish-chauhan)
